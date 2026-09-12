@@ -13,6 +13,7 @@ RELEASE_PATHS = (
     "browser-extension",
     "assets",
     "INSTALL.ps1",
+    "INSTALL-ONLINE.ps1",
     "START_ADVERTPRENEUR_CLI.ps1",
     "advertpreneur.py",
     "pyproject.toml",

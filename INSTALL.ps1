@@ -159,5 +159,5 @@ if ($extensionPath) {
     Write-Host ("Advertpreneur Browser Bridge refreshed: {0}" -f $extensionPath) -ForegroundColor Cyan
     Write-Host "IMPORTANT: open edge://extensions and click Reload once on Advertpreneur Browser Bridge. The localhost broker is already running, so the extension should register immediately." -ForegroundColor Yellow
 }
-Write-Host "V0.15.1 adds the zero-daemon Resource Guard: cross-ADP RAM/CPU pressure awareness, adaptive warm-provider cleanup, heavy-build coordination, and improved /health estate reporting while preserving v0.15 project intelligence." -ForegroundColor DarkGray
+Write-Host "Future releases are available from GitHub and can be installed from inside ADP with /update." -ForegroundColor DarkGray
 Write-Host "Use /providers login codex or /providers login agy for official provider-owned sign-in. Missing provider runtimes can be installed on demand by ADP; OAuth/keyring credentials remain provider-owned." -ForegroundColor DarkGray

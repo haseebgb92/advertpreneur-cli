@@ -1,6 +1,7 @@
 import unittest
 import io
 from contextlib import redirect_stdout
+from unittest import mock
 
 from prompt_toolkit.document import Document
 
@@ -72,6 +73,38 @@ class TuiTests(unittest.TestCase):
             ui._render_live_locked()
 
         self.assertIn(ui._joke, output.getvalue())
+
+    def test_composer_toolbar_exposes_live_status_without_ansi_redraw(self):
+        """The active composer owns the 5 FPS status surface while a task runs."""
+        ui = object.__new__(TerminalUI)
+        ui.toolbar = lambda: [("class:toolbar", " STATUS BAR ")]
+        ui._joke = "A stable joke row."
+        ui._live_active = True
+        ui._live_started = 0.0
+        ui._live_label = "Action"
+        ui._live_detail = "browser"
+        ui._live_compact = False
+
+        with mock.patch("advertpreneur_cli.tui.time.monotonic", return_value=12.4):
+            rendered = "".join(text for _style, text in ui._composer_toolbar())
+
+        self.assertIn("Advertpreneur is acting", rendered)
+        self.assertIn("browser", rendered)
+        self.assertIn("12.4s", rendered)
+        self.assertIn(ui._joke, rendered)
+        self.assertIn("STATUS BAR", rendered)
+
+    def test_live_refresh_worker_requests_prompt_toolkit_repaint_every_fifth_second(self):
+        ui = object.__new__(TerminalUI)
+        ui._live_active = True
+        ui._live_stop = mock.Mock()
+        ui._live_stop.wait.side_effect = [False, True]
+        ui.session = mock.Mock()
+
+        ui._live_refresh_worker()
+
+        ui._live_stop.wait.assert_has_calls([mock.call(0.2), mock.call(0.2)])
+        ui.session.app.invalidate.assert_called_once()
 
     def test_working_card_uses_advertpreneur_ownership_and_hides_model_name(self):
         ui = object.__new__(TerminalUI)

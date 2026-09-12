@@ -1,6 +1,11 @@
-# Advertpreneur CLI v0.21.0
+# Advertpreneur CLI v0.21.1
 
 Advertpreneur CLI (`advertpreneur` or `adp`) is a Windows-first coding and site-operations CLI. It can use Ollama/Ollama Cloud, OpenAI Codex, and Google Antigravity while keeping project discovery, context planning, evidence, packaging, resource checks, WordPress/browser operations, and most orchestration local.
+
+## v0.21.1 — smooth active composer and one-line Windows install
+
+- The active composer now uses Prompt Toolkit’s own 5 FPS renderer for the spinner and elapsed time. It stays responsive without the lower-screen ANSI flicker.
+- Windows has a public, no-login bootstrap: `irm https://github.com/haseebgb92/advertpreneur-cli/releases/latest/download/INSTALL-ONLINE.ps1 | iex`. The downloaded installer verifies the release archive SHA-256 before installing it.
 
 ## v0.21.0 — local Windows operations
 
@@ -16,7 +21,7 @@ Advertpreneur CLI (`advertpreneur` or `adp`) is a Windows-first coding and site-
 - Active tasks no longer run the competing ANSI repaint loop that caused terminal flicker.
 - The composer remains open while ADP works: Enter schedules the next instruction; Escape gives a follow-up priority after the current safe task boundary.
 - AGY reasoning is selected through the model itself; no second low/medium/high prompt is shown.
-- Public releases can install and update without GitHub CLI authentication: PowerShell uses `INSTALL.ps1 -FromGitHub`; macOS/Linux use `curl -fsSL https://github.com/haseebgb92/advertpreneur-cli/releases/latest/download/INSTALL.sh | sh`.
+- Public releases can install and update without GitHub CLI authentication.
 
 ## v0.20.7 — fixed composer surface
 
@@ -49,13 +54,13 @@ Advertpreneur CLI (`advertpreneur` or `adp`) is a Windows-first coding and site-
 
 ## v0.20.2 — GitHub releases and verified terminal updates
 
-- The private GitHub repository and Releases page are the authoritative distribution channel.
+- The public GitHub Releases page is the authoritative distribution channel.
 - Every `v*` tag runs the release workflow: tests, Windows CLI ZIP, Browser Bridge ZIP, SHA-256 checksum file, and update manifest.
 - On startup, the CLI checks for a newer release in the background and shows a non-blocking update notice.
-- `/update` asks for approval, downloads through the user's GitHub CLI session, verifies the release SHA-256, updates the installed package, and asks for a restart.
+- `/update` asks for approval, downloads the public release, verifies its SHA-256, updates the installed package, and asks for a restart.
 - The Browser Bridge is bundled in every CLI release. Its unpacked extension folder stays stable, so users load it once and click **Reload** only after an extension update.
 
-> This is a private repository. A user needs GitHub CLI access to `haseebgb92/advertpreneur-cli`; Advertpreneur never stores a GitHub token itself.
+> No GitHub account, GitHub CLI, or token is required for public installation or `/update`.
 
 ## What it can do
 
@@ -316,13 +321,11 @@ Due work stored in `.advertpreneur/workforce.json` wakes on the next interactive
 
 ## Install and update on Windows
 
-For the first private GitHub installation, install GitHub CLI if needed, authenticate once, then download and run the release installer without manually extracting a ZIP:
+Install from any PowerShell window without GitHub CLI, a GitHub login, a ZIP download, or manual extraction:
 
 ```powershell
-winget install --id GitHub.cli -e
-gh auth login -h github.com
-gh release download latest --repo haseebgb92/advertpreneur-cli --pattern INSTALL.ps1 --dir $env:TEMP
-& "$env:TEMP\INSTALL.ps1" -FromGitHub
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+irm https://github.com/haseebgb92/advertpreneur-cli/releases/latest/download/INSTALL-ONLINE.ps1 | iex
 ```
 
 The installer downloads the release archive, verifies its SHA-256 checksum, installs the CLI, and refreshes the Browser Bridge in its stable unpacked folder under `~/.advertpreneur-cli/browser-extension`. It preserves existing sessions, history, evidence, settings, and provider credentials.
@@ -340,7 +343,7 @@ After that, start the CLI normally. It checks GitHub Releases in the background 
 /update
 ```
 
-`/update` asks before making changes, downloads the release through your GitHub login, verifies SHA-256, and updates the Python package. Restart the CLI after a successful update. If the extension changed, open `chrome://extensions` or `edge://extensions` and click **Reload** once; the browser keeps using the same folder and does not need another ZIP or installation.
+`/update` asks before making changes, downloads the public release, verifies SHA-256, and updates the Python package. Restart the CLI after a successful update. If the extension changed, open `chrome://extensions` or `edge://extensions` and click **Reload** once; the browser keeps using the same folder and does not need another ZIP or installation.
 
 For an offline/local source installation, run:
 
@@ -359,7 +362,7 @@ advertpreneur --version
 Expected:
 
 ```text
-0.20.2
+0.21.1
 ```
 
 Existing login/session/history/evidence/provider state under `~/.advertpreneur-cli` is preserved. The installer removes no provider credentials. On first v0.15 start, obsolete Beacon state/status files are cleaned locally.

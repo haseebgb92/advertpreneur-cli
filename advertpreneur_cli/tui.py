@@ -19,6 +19,7 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import CompleteStyle, clear
 from prompt_toolkit.styles import Style
 
@@ -422,6 +423,7 @@ class TerminalUI:
         self._live_thread: threading.Thread | None = None
         self._live_active = False
         self._live_drawn = False
+        self._prompt_active = False
         self._live_started = 0.0
         self._live_label = "Thinking"
         self._live_model = ""
@@ -536,9 +538,41 @@ class TerminalUI:
                 pass
 
     def _composer_toolbar(self) -> FormattedText:
-        parts: list[tuple[str, str]] = [("class:joke", f"  {self._joke}\n")]
+        parts: list[tuple[str, str]] = []
+        if self._live_active:
+            parts.extend(self._live_status_parts())
+        parts.append(("class:joke", f"  {self._joke}\n"))
         parts.extend(list(self.toolbar()))
         return FormattedText(parts)
+
+    def _live_status_parts(self) -> list[tuple[str, str]]:
+        """Render changing work state inside Prompt Toolkit's owned footer."""
+        elapsed = max(0.0, time.monotonic() - self._live_started)
+        frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        frame = frames[int(elapsed * 10) % len(frames)]
+        activity = {
+            "action": "acting",
+            "coding": "working",
+            "preparing task": "preparing the task",
+            "starting": "starting",
+            "thinking": "thinking",
+            "needs attention": "waiting for input",
+        }.get(str(self._live_label or "").lower(), str(self._live_label or "working").lower())
+        detail = f" · {self._live_detail}" if getattr(self, "_live_detail", "") else ""
+        return [("class:working", f"  {frame} Advertpreneur is {activity}{detail} · {elapsed:.1f}s\n")]
+
+    def _invalidate_live(self) -> None:
+        try:
+            self.session.app.invalidate()
+        except Exception:
+            pass
+
+    def _live_refresh_worker(self) -> None:
+        """Request a prompt-toolkit repaint at 5 FPS without touching stdout."""
+        while not self._live_stop.wait(0.2):
+            if not self._live_active:
+                return
+            self._invalidate_live()
 
     def set_terminal_title(self, project: Path, suffix: str = "") -> None:
         name = project.name or str(project)
@@ -635,12 +669,15 @@ class TerminalUI:
         self._live_lines_drawn = 4
         self._state_changed = self._live_started
 
-        # Never repaint from a background ANSI thread. Prompt Toolkit owns the
-        # input surface, and competing 120ms cursor rewrites caused the lower
-        # terminal to flicker. Structured activity calls redraw deliberately.
-        self._live_thread = None
+        # Prompt Toolkit owns the active composer. Its renderer is invalidated at
+        # 5 FPS so the spinner/elapsed time progress without ANSI cursor races.
+        self._live_thread = threading.Thread(target=self._live_refresh_worker, name="advertpreneur-live-ui", daemon=True)
+        self._live_thread.start()
         with self._live_lock:
-            self._render_live_locked()
+            if self._prompt_active:
+                self._invalidate_live()
+            else:
+                self._render_live_locked()
 
     def work_event(self, label: str, detail: str = "") -> None:
         """Persist one real tool/activity event in terminal scrollback.
@@ -668,7 +705,10 @@ class TerminalUI:
                 self._live_detail = str(detail)[:220]
             if event_driven is not None:
                 self._live_event_driven = bool(event_driven)
-            self._render_live_locked()
+            if self._prompt_active:
+                self._invalidate_live()
+            else:
+                self._render_live_locked()
 
     def end_working(self) -> None:
         if not self._live_active:
@@ -682,10 +722,7 @@ class TerminalUI:
             self._live_active = False
             self._live_drawn = False
         self._live_thread = None
-        try:
-            self.session.app.invalidate()
-        except Exception:
-            pass
+        self._invalidate_live()
 
     def start_activity(self, label: str, states: Sequence[str] | None = None) -> None:
         state = (states or ("Thinking",))[0]
@@ -725,12 +762,16 @@ class TerminalUI:
     def _print_raw(self, text: str = "") -> None:
         with self._live_lock:
             was_live = self._live_active
-            if was_live:
+            # patch_stdout keeps Prompt Toolkit's composer in place.  ANSI
+            # cursor movement here would fight its renderer and flicker.
+            if was_live and not self._prompt_active:
                 self._erase_live_locked()
             sys.stdout.write(text + ("" if text.endswith("\n") else "\n"))
             sys.stdout.flush()
-            if was_live:
+            if was_live and not self._prompt_active:
                 self._render_live_locked()
+            elif was_live:
+                self._invalidate_live()
 
     def print_line(self, text: str = "") -> None:
         self._print_raw(text)
@@ -763,7 +804,21 @@ class TerminalUI:
         print()
 
     def prompt(self) -> str:
-        return self._safe_prompt_call(lambda: self.session.prompt(HTML("<muted>╭─ Message Advertpreneur ─</muted>\n<prompt>› </prompt>")))
+        def composer() -> str:
+            with self._live_lock:
+                self._prompt_active = True
+                # The old non-interactive fallback card is safe to remove before
+                # Prompt Toolkit takes ownership of these rows.
+                self._erase_live_locked()
+            self._invalidate_live()
+            try:
+                with patch_stdout(raw=True):
+                    return self.session.prompt(HTML("<muted>╭─ Message Advertpreneur ─</muted>\n<prompt>› </prompt>"))
+            finally:
+                with self._live_lock:
+                    self._prompt_active = False
+
+        return self._safe_prompt_call(composer)
 
     def _menu_toolbar(self) -> FormattedText:
         parts: list[tuple[str, str]] = [("class:joke", f"  {self._joke}\n")]
