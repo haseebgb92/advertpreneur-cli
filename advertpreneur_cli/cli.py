@@ -27,6 +27,7 @@ from .pricing import is_free_cloud_model, lookup_price
 from .sessions import SessionRecord, SessionStore
 from .state import UserState
 from .tools import ToolError, ToolRegistry
+from .action_gateway import ExternalActionGateway
 from .project_index import ProjectIndex
 from .context_manager import LocalContextManager
 from .checkpoints import CheckpointManager
@@ -51,7 +52,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.20.4"
+VERSION = "0.20.5"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 
 
@@ -2941,6 +2942,7 @@ class AdvertpreneurCLI:
                 "deletion proposal for explicit approval instead.\n"
             )
         plugins_enabled = self._codex_plugins_needed(task_text) if provider == "codex" else False
+        prompt = prompt + "\n\n" + ExternalActionGateway.contract()
         before_q = None
         try: before_q = self.provider_harness.quota(provider, model=model, refresh=True, timeout=10)
         except Exception: pass
@@ -2998,13 +3000,42 @@ class AdvertpreneurCLI:
         if self.current_session.bridge_enabled:
             try: self.bridge.update_status(self.current_session.id, self.bridge_cli_token, "Working", f"Starting · R:{effort}", model or provider)
             except Exception: pass
-        run = self.provider_harness.run(
-            provider, prompt, model=model, effort=effort, cwd=self.project, timeout=900,
-            write=not self.plan_mode, on_event=activity, conversation_id=prior_thread,
-            session_key=self.current_session.id, disabled_mcp_servers=disabled_mcps,
-            mcp_server_states=mcp_states, mcp_server_overrides=mcp_overrides, plugins_enabled=plugins_enabled,
-            developer_instructions=coding_instructions if provider == "codex" else "",
-        )
+        def action_activity(request) -> None:
+            self._external_activity = f"Action · {request.tool}"
+            self.ui.set_working_state("Action", model=model or provider, detail=request.tool, event_driven=True)
+            if self.current_session.bridge_enabled:
+                try:
+                    self.bridge.update_status(self.current_session.id, self.bridge_cli_token, "Working", self._external_activity, model or provider)
+                except Exception:
+                    pass
+
+        gateway = ExternalActionGateway(self.tools, on_action=action_activity)
+        turn_runs: list[ProviderRun] = []
+
+        def run_provider_turn(turn_prompt: str, conversation_id: str) -> tuple[str, str]:
+            turn = self.provider_harness.run(
+                provider, turn_prompt, model=model, effort=effort, cwd=self.project, timeout=900,
+                write=not self.plan_mode, on_event=activity, conversation_id=conversation_id,
+                session_key=self.current_session.id, disabled_mcp_servers=disabled_mcps,
+                mcp_server_states=mcp_states, mcp_server_overrides=mcp_overrides, plugins_enabled=plugins_enabled,
+                developer_instructions=coding_instructions if provider == "codex" else "",
+            )
+            turn_runs.append(turn)
+            return turn.text, turn.conversation_id
+
+        loop = gateway.drive(prompt, run_provider_turn, prior_thread)
+        run = turn_runs[-1]
+        if loop.blocked:
+            run.text = loop.text
+            run.status = "ACTION_BLOCKED"
+            run.returncode = 2
+        else:
+            run.text = loop.text
+        if len(turn_runs) > 1:
+            for field in ("duration_seconds", "input_tokens", "output_tokens", "cache_read_tokens", "thinking_tokens", "total_tokens", "tool_calls", "activity_events"):
+                setattr(run, field, sum(getattr(row, field, 0) for row in turn_runs))
+            run.provider_turns = sum(max(1, int(row.provider_turns or 1)) for row in turn_runs)
+        run.tool_calls += loop.actions
         after_q = None
         try: after_q = self.provider_harness.quota(provider, model=model, refresh=True, timeout=10)
         except Exception: pass
