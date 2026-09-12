@@ -1619,15 +1619,19 @@ class ExternalProviderHarness:
         plugins_enabled: bool = False,
     ) -> Dict[str, Any]:
         config: Dict[str, Any] = {"features.plugins": bool(plugins_enabled)}
-        # IMPORTANT: request-level Codex config replaces an MCP server table.
-        # Sending only mcp_servers.<name>.enabled drops command/url and produces
-        # "invalid transport". Only inject complete, transport-preserving server
-        # entries. Relevant servers are omitted so they inherit the user's real
-        # Codex configuration unchanged.
+        # IMPORTANT: app-server request config uses dotted scalar/table-field
+        # assignments. Passing a whole dict at ``mcp_servers.<name>`` is accepted
+        # by the request parser but does not register its tools in the Codex turn.
+        # Send every complete transport field separately so the server is both
+        # valid and visible to the model. Relevant user servers are omitted so
+        # they inherit the user's real Codex configuration unchanged.
         for raw, entry in (mcp_server_overrides or {}).items():
             name = str(raw or "").strip()
             if re.fullmatch(r"[A-Za-z0-9_.-]+", name) and isinstance(entry, dict):
-                config[f"mcp_servers.{name}"] = dict(entry)
+                for raw_key, value in entry.items():
+                    key = str(raw_key or "").strip()
+                    if re.fullmatch(r"[A-Za-z0-9_.-]+", key):
+                        config[f"mcp_servers.{name}.{key}"] = value
         return config
 
     @staticmethod

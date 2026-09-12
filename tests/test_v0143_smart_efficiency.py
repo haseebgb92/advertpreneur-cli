@@ -44,13 +44,15 @@ def test_codex_normal_turn_is_persistent_and_resume_reuses_exact_thread(tmp_path
     assert "--ephemeral" not in second.command
 
 
-def test_codex_mcp_disable_override_preserves_transport():
+def test_codex_mcp_override_serializes_complete_transport_as_dotted_config():
     config = ExternalProviderHarness._codex_session_config(
         {"aios": {"enabled": False, "command": "node", "args": ["server.mjs"]}},
         plugins_enabled=False,
     )
-    assert "mcp_servers.aios.enabled" not in config
-    assert config["mcp_servers.aios"] == {"enabled": False, "command": "node", "args": ["server.mjs"]}
+    assert config["mcp_servers.aios.enabled"] is False
+    assert config["mcp_servers.aios.command"] == "node"
+    assert config["mcp_servers.aios.args"] == ["server.mjs"]
+    assert "mcp_servers.aios" not in config
 
 
 def test_cli_builds_complete_transport_override_only_for_irrelevant_mcp():

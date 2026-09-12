@@ -1,6 +1,11 @@
-# Advertpreneur CLI v0.20.3
+# Advertpreneur CLI v0.20.4
 
 Advertpreneur CLI (`advertpreneur` or `adp`) is a Windows-first coding and site-operations CLI. It can use Ollama/Ollama Cloud, OpenAI Codex, and Google Antigravity while keeping project discovery, context planning, evidence, packaging, resource checks, WordPress/browser operations, and most orchestration local.
+
+## v0.20.4 — verified Codex Browser Bridge handoff
+
+- Fixes the Codex app-server transport serialization so the automatic Browser Bridge MCP tools are actually visible to external Codex turns.
+- Verified with a public-page external-Codex smoke test: Codex opened and inspected `example.com` through the extension-backed controlled tab.
 
 ## v0.20.3 — Codex-controlled live-site browser work
 
