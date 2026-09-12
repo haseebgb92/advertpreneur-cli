@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+advertpreneur-cli.config.json
+.env
+.advertpreneur/
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+.venv/
