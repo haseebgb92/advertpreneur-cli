@@ -51,7 +51,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.20.1"
+VERSION = "0.20.2"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 
 
