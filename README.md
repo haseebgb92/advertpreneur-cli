@@ -1,6 +1,11 @@
-# Advertpreneur CLI v0.20.9
+# Advertpreneur CLI v0.21.0
 
 Advertpreneur CLI (`advertpreneur` or `adp`) is a Windows-first coding and site-operations CLI. It can use Ollama/Ollama Cloud, OpenAI Codex, and Google Antigravity while keeping project discovery, context planning, evidence, packaging, resource checks, WordPress/browser operations, and most orchestration local.
+
+## v0.21.0 — local Windows operations
+
+- All model providers can now request the same approval-governed local Windows operations through ADP: inspect readiness, open a verified local path, or launch a small allowlist of local utilities.
+- Browser Bridge remains the preferred automatic browser control path whenever its extension is connected; ADP falls back locally only when it is unavailable.
 
 ## v0.20.9 — visible update notes
 

@@ -88,6 +88,13 @@ BROWSER_SCHEMAS = [
     }, ["action"]),
 ]
 
+WINDOWS_SCHEMAS = [
+    tool_schema("windows", "Perform an approval-governed local Windows operation. Use for opening a verified local folder/file or launching a named local app; never use it to bypass browser/site safeguards.", {
+        "action": {"type": "string", "enum": ["status", "open_path", "open_app"]},
+        "path": {"type": "string"}, "app": {"type": "string"},
+    }, ["action"]),
+]
+
 
 EXTENSION_SCHEMAS = [
     tool_schema("load_skill", "Load an installed Codex skill by exact id/name or search term. Use when a relevant installed skill is listed in the system capability catalog.", {
@@ -105,7 +112,7 @@ EXTENSION_SCHEMAS = [
 
 # Compatibility constant; CodingAgent now asks the registry for the smallest
 # relevant schema set at runtime.
-SCHEMAS = BASE_SCHEMAS + RESEARCH_SCHEMAS + BROWSER_SCHEMAS + EXTENSION_SCHEMAS
+SCHEMAS = BASE_SCHEMAS + RESEARCH_SCHEMAS + BROWSER_SCHEMAS + WINDOWS_SCHEMAS + EXTENSION_SCHEMAS
 
 
 class ToolRegistry:
@@ -228,6 +235,9 @@ class ToolRegistry:
         browser_terms = ("browser", "website", "web page", "reference site", "screenshot", "reverse engineer", "reverse-engineer", "pixel", "design map", "navigate to", "open the site", "open website", "http://", "https://", "wp-admin", "wordpress", "hostinger", "cpanel", "plesk", "file manager", "upload plugin", "upload theme", "install plugin", "activate theme", "edit post", "edit page", "wordpress settings")
         if any(x in text for x in browser_terms) or "browser" in used:
             schemas.extend(BROWSER_SCHEMAS)
+        windows_terms = ("windows", "desktop", "local folder", "file explorer", "open folder", "open app", "launch app")
+        if any(x in text for x in windows_terms) or "windows" in used:
+            schemas.extend(WINDOWS_SCHEMAS)
         return schemas
 
     def _path(self, relative: str | None) -> Path:
@@ -253,6 +263,31 @@ class ToolRegistry:
             omitted = len(result) - self.max_output_chars
             result = result[: self.max_output_chars] + f"\n...[truncated {omitted} chars]"
         return result
+
+    def tool_windows(self, action: str, path: str = "", app: str = "") -> str:
+        if os.name != "nt":
+            raise ToolError("Windows operations are available only on Windows hosts.")
+        action = str(action or "").lower().strip()
+        if action == "status":
+            return "Windows local operations ready · approval required for launch actions"
+        if action == "open_path":
+            candidate = Path(path).expanduser().resolve()
+            if not candidate.exists():
+                raise ToolError(f"Local path not found: {candidate}")
+            if not self.approve("windows", f"open local path {candidate}"):
+                raise ToolError("User declined Windows open operation.")
+            os.startfile(str(candidate))
+            return f"Opened local path · {candidate}"
+        if action == "open_app":
+            allowed = {"notepad", "explorer", "calc", "mspaint"}
+            target = str(app or "").lower().strip()
+            if target not in allowed:
+                raise ToolError("Allowed local apps: notepad, explorer, calc, mspaint.")
+            if not self.approve("windows", f"open local app {target}"):
+                raise ToolError("User declined Windows app launch.")
+            subprocess.Popen([target], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            return f"Opened local app · {target}"
+        raise ToolError("Windows action must be status, open_path, or open_app.")
 
     def tool_list_files(self, path: str = ".", recursive: bool = False, max_entries: int = 300) -> str:
         base = self._path(path)

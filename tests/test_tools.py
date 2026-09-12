@@ -7,6 +7,14 @@ from pathlib import Path
 from advertpreneur_cli.tools import ToolError, ToolRegistry
 
 
+def test_windows_operation_schema_is_exposed_only_for_local_desktop_tasks(tmp_path):
+    reg = ToolRegistry(tmp_path)
+    names = {row["function"]["name"] for row in reg.schemas("open a local Windows folder")}
+    assert "windows" in names
+    names = {row["function"]["name"] for row in reg.schemas("read project config")}
+    assert "windows" not in names
+
+
 class ToolTests(unittest.TestCase):
     def test_root_confinement_and_edit(self):
         with tempfile.TemporaryDirectory() as td:
