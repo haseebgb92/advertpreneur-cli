@@ -112,6 +112,21 @@ class GitHubReleaseClient:
         except (KeyError, TypeError, json.JSONDecodeError) as exc:
             raise UpdateError("GitHub returned an invalid release response") from exc
 
+    def latest_notes(self) -> str:
+        """Return the public release body for ADP's post-update changelog."""
+        try:
+            raw = self._run(["api", f"repos/{self.repository}/releases/latest"])
+        except UpdateError:
+            try:
+                with urllib.request.urlopen(f"https://api.github.com/repos/{self.repository}/releases/latest", timeout=30) as response:
+                    raw = response.read().decode("utf-8")
+            except Exception:
+                return ""
+        try:
+            return str(json.loads(raw).get("body") or "").strip()
+        except (TypeError, json.JSONDecodeError):
+            return ""
+
     def download(self, tag: str, pattern: str, destination: Path) -> Path:
         destination.mkdir(parents=True, exist_ok=True)
         try:

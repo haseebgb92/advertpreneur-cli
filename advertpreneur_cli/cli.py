@@ -54,7 +54,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.20.8"
+VERSION = "0.20.9"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 
 
@@ -3857,6 +3857,7 @@ class AdvertpreneurCLI:
         try:
             client = GitHubReleaseClient(self.update_repository)
             _tag, manifest = client.latest_manifest()
+            release_notes = client.latest_notes()
             if not release_is_newer(manifest.version, VERSION):
                 self.ui.success(f"Already up to date · v{VERSION}")
                 return
@@ -3873,6 +3874,9 @@ class AdvertpreneurCLI:
             extension = self.bridge.extension_path()
             self.ui.success(f"Updated to v{installed.version} · restart Advertpreneur to use the new version")
             self.ui.muted(f"Browser Bridge files refreshed · {extension}")
+            if release_notes:
+                self.ui.heading("What's new")
+                self.ui.muted(release_notes[:1800])
             self.ui.muted("If the extension changed, open chrome://extensions or edge://extensions and click Reload once.")
         except UpdateError as exc:
             detail = str(exc).strip()
