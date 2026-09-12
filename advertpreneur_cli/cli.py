@@ -28,6 +28,7 @@ from .sessions import SessionRecord, SessionStore
 from .state import UserState
 from .tools import ToolError, ToolRegistry
 from .action_gateway import ExternalActionGateway
+from .ownership import find_artifact_credits, normalize_user_output, worker_ownership_contract
 from .project_index import ProjectIndex
 from .context_manager import LocalContextManager
 from .checkpoints import CheckpointManager
@@ -52,7 +53,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.20.5"
+VERSION = "0.20.6"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 
 
@@ -2929,6 +2930,7 @@ class AdvertpreneurCLI:
             "never claim PASS without executing required validation. Do not access files outside this workspace. "
             "Return a concise factual completion report.\n" + contract_note + ("\n" + plan_note if plan_note else "")
         )
+        coding_instructions += "\n" + worker_ownership_contract()
         mcp_states = self._codex_mcp_states(task_text) if provider == "codex" else {}
         disabled_mcps = [name for name, enabled in mcp_states.items() if not enabled]
         mcp_overrides = self._codex_mcp_transport_overrides(task_text) if provider == "codex" else {}
@@ -3248,6 +3250,23 @@ class AdvertpreneurCLI:
         except KeyboardInterrupt:
             self.ui.muted("Shell command interrupted · Advertpreneur remains open")
 
+    def _finalize_task_card(
+        self, status: str, result_text: str, *, changed_files: list[str] | None = None,
+        tool_calls: int = 0, verification: str = "", boundary: str = "",
+    ) -> None:
+        """Render one durable outcome for every top-level task exit."""
+        if getattr(self, "_task_result_card_emitted", False):
+            return
+        self._task_result_card_emitted = True
+        self.ui.result_card(
+            status,
+            result_text,
+            files=list(changed_files or [])[:8],
+            actions=max(0, int(tool_calls or 0)),
+            verification=verification,
+            boundary=boundary,
+        )
+
     def run_task(
         self,
         raw: str,
@@ -3287,6 +3306,7 @@ class AdvertpreneurCLI:
         # enter a working state until after this synchronous work had completed,
         # which made each submitted task look like an unexplained pause.
         self.ui.begin_working(profile.model, "Preparing task", 1)
+        self._task_result_card_emitted = False
         self.notifier.task_started(profile.model, "Preparing task")
         self._ensure_project_index()
         self._maybe_auto_compact()
@@ -3381,7 +3401,7 @@ class AdvertpreneurCLI:
                 task_tool_calls = int(run.tool_calls or 0)
                 task_cache_read = int(run.cache_read_tokens or 0)
                 task_thinking = int(run.thinking_tokens or 0)
-                result_text = run.text or (run.stderr if not run.ok else "(provider returned no text)")
+                result_text = normalize_user_output(run.text or (run.stderr if not run.ok else "(provider returned no text)"))
                 self.last_result = result_text
                 self.ui.result(result_text)
                 quota_delta = ""
@@ -3430,9 +3450,9 @@ class AdvertpreneurCLI:
                 task_tool_calls = int(getattr(result, "tool_calls", 0) or 0)
                 if image_paths:
                     self.agent.strip_visual_payloads()
-                result_text = result.text
-                self.last_result = result.text
-                self.ui.result(result.text)
+                result_text = normalize_user_output(result.text)
+                self.last_result = result_text
+                self.ui.result(result_text)
                 self._record_task_in_session()
                 task = self.budget.task
                 self.ui.muted(
@@ -3506,6 +3526,12 @@ class AdvertpreneurCLI:
 
         try:
             changed_paths = list(getattr(cp, "changed_files", []) or [])
+            credited = find_artifact_credits([self.project / path for path in changed_paths])
+            if credited:
+                result_status = "failed"
+                completed_ok = False
+                relative = ", ".join(str(path.relative_to(self.project)) for path in credited[:3])
+                result_text = f"Advertpreneur found unapproved worker attribution in {relative}."
             self.working_record.record_task(raw, result_text, result_status, changed_paths)
             self.workforce.record_outcome(
                 specialist.key,
@@ -3526,6 +3552,18 @@ class AdvertpreneurCLI:
                     self.ui.muted("Handbook · project-specific experience retained locally · cloud tokens 0")
         except Exception:
             pass
+        boundary = ""
+        low_result = str(result_text or "").lower()
+        if "login needed in browser" in low_result:
+            result_status = "login_needed"; boundary = "Sign in in the controlled browser, then continue the task."
+        elif "approval" in low_result or "proposal" in low_result:
+            result_status = "approval_needed"; boundary = "Review and approve the proposed operation before continuing."
+        self._finalize_task_card(
+            result_status, normalize_user_output(result_text),
+            changed_files=changed_paths if 'changed_paths' in locals() else [],
+            tool_calls=task_tool_calls if 'task_tool_calls' in locals() else 0,
+            boundary=boundary,
+        )
         if self.local_telemetry:
             try:
                 task_usage = self.budget.task

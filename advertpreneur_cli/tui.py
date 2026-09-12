@@ -587,16 +587,24 @@ class TerminalUI:
         frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         frame = frames[int(elapsed * 10) % len(frames)]
         bar = self._plain_toolbar(self.toolbar())
+        activity = {
+            "action": "acting",
+            "coding": "working",
+            "preparing task": "preparing the task",
+            "starting": "starting",
+            "thinking": "thinking",
+            "needs attention": "waiting for input",
+        }.get(str(getattr(self, "_live_label", "") or "").lower(), str(getattr(self, "_live_label", "working") or "working").lower())
         if getattr(self, "_live_compact", False):
             file_part = f" · {self._live_detail}" if getattr(self, "_live_detail", "") else ""
-            working = f" {frame} coding{file_part} · {elapsed:.1f}s"
+            working = f" {frame} Advertpreneur is working{file_part} · {elapsed:.1f}s"
             sys.stdout.write("\r\x1b[2K" + self._fit(working, width) + "\n")
             sys.stdout.write("\r\x1b[2K\x1b[38;2;138;143;152m" + self._fit(f"  {self._joke}", width) + "\x1b[0m\n")
             sys.stdout.write("\r\x1b[2K\x1b[48;2;35;37;42m\x1b[38;2;215;217;222m" + self._fit(bar, width) + "\x1b[0m\n")
             self._live_lines_drawn = 3
         else:
             detail = f" · {self._live_detail}" if getattr(self, "_live_detail", "") else ""
-            working = f" {frame} {self._live_label} · {self._live_model} · turn {self._live_turn}{detail} · {elapsed:.1f}s"
+            working = f" {frame} Advertpreneur is {activity}{detail} · {elapsed:.1f}s"
             second = f"  {self._joke}"
             sys.stdout.write("\r\x1b[2K" + self._fit(working, width) + "\n")
             sys.stdout.write("\r\x1b[2K\x1b[38;2;138;143;152m" + self._fit(second, width) + "\x1b[0m\n")
@@ -693,6 +701,30 @@ class TerminalUI:
     def stop_activity(self, final: str | None = None) -> None:
         if final:
             self.print_line(f"  \x1b[38;2;66;184;131m✓\x1b[0m {final}")
+
+    def result_card(
+        self, outcome: str, summary: str, *, files: Sequence[str] = (), actions: int = 0,
+        verification: str = "", boundary: str = "",
+    ) -> None:
+        """Print a durable, product-owned task result above the fixed composer rows."""
+        status = {
+            "completed": "Completed",
+            "failed": "Needs attention",
+            "interrupted": "Interrupted",
+            "login_needed": "Login needed",
+            "approval_needed": "Approval needed",
+        }.get(str(outcome or "").lower(), "Result")
+        icon = "✓" if str(outcome).lower() == "completed" else "!"
+        lines = [f"  {icon} Advertpreneur result · {status}", f"    {str(summary or '').strip() or 'No result details were returned.'}"]
+        if files:
+            lines.append("    Files · " + ", ".join(str(item) for item in files[:8]))
+        if actions:
+            lines.append(f"    Actions · {int(actions)}")
+        if verification:
+            lines.append("    Verification · " + str(verification).strip())
+        if boundary:
+            lines.append("    Next · " + str(boundary).strip())
+        self._print_raw("\n".join(lines))
 
     def _print_raw(self, text: str = "") -> None:
         with self._live_lock:

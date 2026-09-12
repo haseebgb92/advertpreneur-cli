@@ -13,6 +13,7 @@ from .client import OllamaClient
 from .config import ModelProfile, Settings
 from .pricing import is_free_cloud_model, lookup_price
 from .tools import ToolError, ToolRegistry
+from .ownership import worker_ownership_contract
 
 
 SYSTEM_PROMPT = """You are Advertpreneur CLI, a coding agent restricted to one project root.
@@ -77,7 +78,7 @@ class CodingAgent:
         return OllamaClient(provider, self.api_key)
 
     def system_prompt(self) -> str:
-        return SYSTEM_PROMPT + ("\n" + self.extra_instructions.strip() if self.extra_instructions.strip() else "")
+        return SYSTEM_PROMPT + "\n" + worker_ownership_contract() + ("\n" + self.extra_instructions.strip() if self.extra_instructions.strip() else "")
 
     def set_extra_instructions(self, text: str) -> None:
         self.extra_instructions = text or ""

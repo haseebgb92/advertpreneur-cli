@@ -1,6 +1,12 @@
-# Advertpreneur CLI v0.20.5
+# Advertpreneur CLI v0.20.6
 
 Advertpreneur CLI (`advertpreneur` or `adp`) is a Windows-first coding and site-operations CLI. It can use Ollama/Ollama Cloud, OpenAI Codex, and Google Antigravity while keeping project discovery, context planning, evidence, packaging, resource checks, WordPress/browser operations, and most orchestration local.
+
+## v0.20.6 — persistent Advertpreneur chat and ownership
+
+- The active task now keeps a stable Advertpreneur work card, composer, joke row, and status bar visible together.
+- Every task ends with a durable Advertpreneur result card, including failures, interruptions, login boundaries, and approval boundaries.
+- Provider workers are never credited in chat or generated text artifacts. Explicit worker credits are normalized in responses and fail task verification in changed text files.
 
 ## v0.20.5 — unified actions for every provider
 

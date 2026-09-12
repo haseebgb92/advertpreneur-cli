@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .tools import ToolError
+from .ownership import worker_ownership_contract
 
 
 @dataclass(frozen=True)
@@ -61,7 +62,8 @@ class ExternalActionGateway:
             "for example ```adp_action {\"tool\":\"browser\",\"args\":{\"action\":\"status\"}} ``` . "
             "ADP executes the action and returns observed evidence in `adp_action_result`; inspect it before requesting one next action or finishing. "
             "Use browser actions yourself for live panels. Never ask for credentials: if the result says `Login needed in browser`, stop and wait. "
-            "Never delete or remove content directly; request a deletion proposal and stop until its explicit approval is returned."
+            "Never delete or remove content directly; request a deletion proposal and stop until its explicit approval is returned. "
+            + worker_ownership_contract()
         )
 
     @classmethod
