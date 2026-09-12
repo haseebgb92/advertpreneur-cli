@@ -17,10 +17,14 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertIn("INSTALL.ps1", names)
         self.assertIn("pyproject.toml", names)
 
-    def test_github_bootstrap_resolves_the_actual_latest_tag(self):
+    def test_public_github_bootstrap_downloads_verified_latest_release_without_gh_auth(self):
         installer = (Path.cwd() / "INSTALL.ps1").read_text(encoding="utf-8")
         self.assertIn("releases/latest", installer)
-        self.assertIn("gh release download $releaseTag", installer)
+        self.assertIn("Invoke-WebRequest", installer)
+        self.assertIn("Get-FileHash -Algorithm SHA256", installer)
+        shell_installer = (Path.cwd() / "INSTALL.sh").read_text(encoding="utf-8")
+        self.assertIn("update-manifest.json", shell_installer)
+        self.assertIn("sha256", shell_installer)
 
 
 if __name__ == "__main__":

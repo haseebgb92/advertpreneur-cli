@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import queue
 import json
 import os
 import re
@@ -53,7 +54,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.20.7"
+VERSION = "0.20.8"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 
 
@@ -185,6 +186,9 @@ class AdvertpreneurCLI:
         self.session_store = SessionStore(APP_DIR / "sessions")
         self.current_session = self.session_store.create(self.project, self.active.provider, self.active.model)
         self.last_result = ""
+        self._queued_messages: queue.Queue[tuple[bool, str]] = queue.Queue()
+        self._task_thread: threading.Thread | None = None
+        self._task_lock = threading.RLock()
         self.git_branch = ""
         self.git_dirty_count = 0
 
@@ -1001,10 +1005,13 @@ class AdvertpreneurCLI:
         if not role:
             return
         if role in {"coder", "all"}:
-            fixed_agy_effort = ExternalProviderHarness.agy_model_effort(model) if provider == "agy" else ""
-            if fixed_agy_effort:
-                self.agy_effort = fixed_agy_effort
-                self.ui.muted(f"AGY model defines reasoning as {fixed_agy_effort}; no separate --effort flag will be sent.")
+            if provider == "agy":
+                # AGY publishes reasoning/thinking as part of the model identity
+                # (for example Claude Sonnet Thinking). Selecting its model is the
+                # only intentional choice; do not make the operator pick an
+                # unsupported second low/medium/high tier.
+                self.agy_effort = ExternalProviderHarness.agy_effective_effort(model, self.agy_effort)
+                self.ui.muted("AGY reasoning is defined by the selected model; no separate reasoning menu.")
             else:
                 current_effort = self.codex_effort if provider == "codex" else self.agy_effort
                 picked_effort = self.ui.choose(
@@ -4061,9 +4068,29 @@ class AdvertpreneurCLI:
                     (self.ui.info if item.state == "ready" else self.ui.muted)(message)
             except Exception:
                 pass
+            if (not self._task_thread or not self._task_thread.is_alive()) and not self._queued_messages.empty():
+                priority: list[str] = []
+                scheduled: list[str] = []
+                while not self._queued_messages.empty():
+                    immediate, message = self._queued_messages.get_nowait()
+                    (priority if immediate else scheduled).append(message)
+                for message in priority + scheduled:
+                    self._queued_messages.put((False, message))
+                _immediate, pending_raw = self._queued_messages.get_nowait()
             if pending_raw is not None:
                 raw = pending_raw.strip()
                 pending_raw = None
+            elif self._task_thread and self._task_thread.is_alive():
+                try:
+                    raw = self.ui.prompt()
+                except EOFError:
+                    raw = ""
+                immediate = raw.startswith("\x00ADP_IMMEDIATE\x00")
+                raw = raw.removeprefix("\x00ADP_IMMEDIATE\x00").strip()
+                if raw:
+                    self._queued_messages.put((immediate, raw))
+                    self.ui.muted("Queued next message" + (" · priority" if immediate else ""))
+                continue
             else:
                 bridge_hops = 0
                 try:
@@ -4094,7 +4121,18 @@ class AdvertpreneurCLI:
                 elif raw.startswith("!"):
                     self.run_shell(raw[1:].strip())
                 else:
-                    dispatch = self.run_task(raw)
+                    def worker(instruction: str) -> None:
+                        try:
+                            self.run_task(instruction)
+                        finally:
+                            with self._task_lock:
+                                self._task_thread = None
+                    with self._task_lock:
+                        self._task_thread = threading.Thread(target=worker, args=(raw,), name="advertpreneur-task", daemon=True)
+                        self._task_thread.start()
+                    # Keep the composer active while the task thread runs. The
+                    # next iteration accepts queued or priority messages.
+                    continue
                     if dispatch and dispatch.paired and self.current_session.bridge_enabled and self.current_session.bridge_autopilot:
                         if bridge_hops >= self.bridge_max_hops:
                             self.ui.muted(f"Browser Bridge · automatic turn limit {self.bridge_max_hops} reached · returning to local prompt")

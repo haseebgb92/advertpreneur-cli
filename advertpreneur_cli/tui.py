@@ -477,6 +477,11 @@ class TerminalUI:
                     buf.text = ""
                     buf.cursor_position = 0
                 return
+            if buf.text.strip():
+                # The main loop treats this prefix as a priority follow-up while
+                # a task is active. It is intentionally never shown to the user.
+                event.app.exit(result="\x00ADP_IMMEDIATE\x00" + buf.text)
+                return
 
         @self.kb.add("enter")
         def _(event) -> None:
@@ -630,22 +635,10 @@ class TerminalUI:
         self._live_lines_drawn = 4
         self._state_changed = self._live_started
 
-        def worker() -> None:
-            while not self._live_stop.wait(0.12):
-                now = time.monotonic()
-                with self._live_lock:
-                    if now - self._joke_changed >= 7.0:
-                        choices = [j for j in TECH_JOKES if j != self._joke]
-                        self._joke = random.choice(choices or TECH_JOKES)
-                        self._joke_changed = now
-                    if (not getattr(self, "_live_event_driven", False)) and now - self._state_changed >= 5.5 and self._live_label in WORKING_STATES:
-                        choices = [s for s in WORKING_STATES if s != self._live_label]
-                        self._live_label = random.choice(choices or WORKING_STATES)
-                        self._state_changed = now
-                    self._render_live_locked()
-
-        self._live_thread = threading.Thread(target=worker, name="advertpreneur-live-footer", daemon=True)
-        self._live_thread.start()
+        # Never repaint from a background ANSI thread. Prompt Toolkit owns the
+        # input surface, and competing 120ms cursor rewrites caused the lower
+        # terminal to flicker. Structured activity calls redraw deliberately.
+        self._live_thread = None
         with self._live_lock:
             self._render_live_locked()
 

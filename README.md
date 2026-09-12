@@ -1,6 +1,13 @@
-# Advertpreneur CLI v0.20.7
+# Advertpreneur CLI v0.20.8
 
 Advertpreneur CLI (`advertpreneur` or `adp`) is a Windows-first coding and site-operations CLI. It can use Ollama/Ollama Cloud, OpenAI Codex, and Google Antigravity while keeping project discovery, context planning, evidence, packaging, resource checks, WordPress/browser operations, and most orchestration local.
+
+## v0.20.8 — stable active composer and public installation
+
+- Active tasks no longer run the competing ANSI repaint loop that caused terminal flicker.
+- The composer remains open while ADP works: Enter schedules the next instruction; Escape gives a follow-up priority after the current safe task boundary.
+- AGY reasoning is selected through the model itself; no second low/medium/high prompt is shown.
+- Public releases can install and update without GitHub CLI authentication: PowerShell uses `INSTALL.ps1 -FromGitHub`; macOS/Linux use `curl -fsSL https://github.com/haseebgb92/advertpreneur-cli/releases/latest/download/INSTALL.sh | sh`.
 
 ## v0.20.7 — fixed composer surface
 

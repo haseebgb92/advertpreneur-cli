@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,7 +98,14 @@ class GitHubReleaseClient:
         return completed.stdout
 
     def latest_tag(self) -> str:
-        raw = self._run(["api", f"repos/{self.repository}/releases/latest"])
+        try:
+            raw = self._run(["api", f"repos/{self.repository}/releases/latest"])
+        except UpdateError:
+            try:
+                with urllib.request.urlopen(f"https://api.github.com/repos/{self.repository}/releases/latest", timeout=30) as response:
+                    raw = response.read().decode("utf-8")
+            except Exception as exc:
+                raise UpdateError("Could not read the public GitHub release") from exc
         try:
             body = json.loads(raw)
             return str(body["tag_name"])
@@ -106,7 +114,15 @@ class GitHubReleaseClient:
 
     def download(self, tag: str, pattern: str, destination: Path) -> Path:
         destination.mkdir(parents=True, exist_ok=True)
-        self._run(["release", "download", tag, "--repo", self.repository, "--pattern", pattern, "--dir", str(destination), "--clobber"])
+        try:
+            self._run(["release", "download", tag, "--repo", self.repository, "--pattern", pattern, "--dir", str(destination), "--clobber"])
+        except UpdateError:
+            try:
+                urllib.request.urlretrieve(
+                    f"https://github.com/{self.repository}/releases/download/{tag}/{pattern}", destination / pattern,
+                )
+            except Exception as exc:
+                raise UpdateError(f"Could not download public release asset {pattern}") from exc
         path = destination / pattern
         if not path.is_file():
             raise UpdateError(f"GitHub did not download {pattern}")

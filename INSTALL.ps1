@@ -7,19 +7,15 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ($FromGitHub) {
-    $gh = Get-Command gh -ErrorAction SilentlyContinue
-    if (-not $gh) { throw "GitHub CLI is required for private installs. Install GitHub CLI, run 'gh auth login -h github.com', then retry." }
     $downloadRoot = Join-Path $env:LOCALAPPDATA "AdvertpreneurCLI\downloads"
     $stage = Join-Path $downloadRoot ("install-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     try {
-        $release = (& gh api "repos/$Repository/releases/latest" | ConvertFrom-Json)
-        $releaseTag = [string]$release.tag_name
-        if (-not $releaseTag) { throw "GitHub did not return a latest release tag." }
-        & gh release download $releaseTag --repo $Repository --pattern "update-manifest.json" --dir $stage --clobber
+        $base = "https://github.com/$Repository/releases/latest/download"
+        Invoke-WebRequest -UseBasicParsing "$base/update-manifest.json" -OutFile (Join-Path $stage "update-manifest.json")
         $manifest = Get-Content (Join-Path $stage "update-manifest.json") -Raw | ConvertFrom-Json
         if (-not $manifest.asset -or -not $manifest.sha256) { throw "Release manifest is invalid." }
-        & gh release download $releaseTag --repo $Repository --pattern $manifest.asset --dir $stage --clobber
+        Invoke-WebRequest -UseBasicParsing "$base/$($manifest.asset)" -OutFile (Join-Path $stage $manifest.asset)
         $archive = Join-Path $stage $manifest.asset
         $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
         if ($actual -ne ([string]$manifest.sha256).ToLowerInvariant()) { throw "Release checksum verification failed." }
