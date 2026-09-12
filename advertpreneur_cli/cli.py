@@ -51,7 +51,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.20.2"
+VERSION = "0.20.3"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 
 
@@ -2792,9 +2792,24 @@ class AdvertpreneurCLI:
         preserves the minimum transport required to validate while disabling the
         server. Relevant servers are omitted so Codex inherits their real config.
         """
+        text = str(task_text or "").lower()
+        live_site_terms = (
+            "wp-admin", "wordpress", "hostinger", "cpanel", "plesk", "file manager",
+            "upload plugin", "upload theme", "install plugin", "activate theme", "edit post",
+            "edit page", "wordpress settings", "site settings",
+        )
+        live_site = any(term in text for term in live_site_terms)
+        project = Path(getattr(self, "project", Path.cwd())).resolve()
         states = self._codex_mcp_states(task_text)
         if not states or not hasattr(self, "mcp_manager"):
-            return {}
+            overrides: Dict[str, Dict[str, Any]] = {}
+            if live_site:
+                overrides["advertpreneur-browser"] = {
+                    "enabled": True, "command": sys.executable,
+                    "args": ["-m", "advertpreneur_cli.browser_mcp", "--project", str(project)],
+                    "cwd": str(project),
+                }
+            return overrides
         try:
             rows = {str(row.name): row for row in self.mcp_manager.discover() if row.enabled}
         except Exception:
@@ -2826,6 +2841,15 @@ class AdvertpreneurCLI:
                 # overridden; never trade token savings for a broken config.
                 continue
             overrides[name] = entry
+        if live_site:
+            # This is an ADP-owned stdio server, not a user MCP. Supplying its
+            # complete transport lets the native Codex session call the existing
+            # Browser Bridge directly and open/focus its own controlled tab.
+            overrides["advertpreneur-browser"] = {
+                "enabled": True, "command": sys.executable,
+                "args": ["-m", "advertpreneur_cli.browser_mcp", "--project", str(project)],
+                "cwd": str(project),
+            }
         return overrides
 
     def _codex_disabled_mcps(self, task_text: str) -> List[str]:
@@ -2907,6 +2931,15 @@ class AdvertpreneurCLI:
         mcp_states = self._codex_mcp_states(task_text) if provider == "codex" else {}
         disabled_mcps = [name for name, enabled in mcp_states.items() if not enabled]
         mcp_overrides = self._codex_mcp_transport_overrides(task_text) if provider == "codex" else {}
+        if provider == "codex" and "advertpreneur-browser" in mcp_overrides:
+            coding_instructions += (
+                "\n\nLive-site browser contract: use the `advertpreneur-browser` MCP tools yourself for WordPress, wp-admin, "
+                "Hostinger, and hosting-panel work. `browser_navigate` opens and focuses the controlled browser tab through "
+                "Advertpreneur's Browser Bridge. Inspect observed UI before each mutation and after each result. If a login page "
+                "is observed, report `Login needed in browser` and wait; never request credentials. Do not ask the operator to "
+                "copy URLs, click controls, or run manual browser commands. Never delete/remove through browser tools; report a "
+                "deletion proposal for explicit approval instead.\n"
+            )
         plugins_enabled = self._codex_plugins_needed(task_text) if provider == "codex" else False
         before_q = None
         try: before_q = self.provider_harness.quota(provider, model=model, refresh=True, timeout=10)

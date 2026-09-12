@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from advertpreneur_cli.cli import AdvertpreneurCLI
+from advertpreneur_cli.browser_mcp import BrowserMCPServer
 from advertpreneur_cli.provider_harness import ExternalProviderHarness
 from advertpreneur_cli.sessions import SessionStore
 from advertpreneur_cli.tools import ToolRegistry
@@ -68,6 +69,28 @@ def test_cli_builds_complete_transport_override_only_for_irrelevant_mcp():
     dns = cli._codex_mcp_transport_overrides("change Hostinger DNS")
     assert "hostinger-dns" not in dns
     assert dns["aios"]["command"] == "node"
+
+
+def test_live_wordpress_task_injects_advertpreneur_browser_bridge_mcp():
+    cli = object.__new__(AdvertpreneurCLI)
+    cli.project = Path("D:/site-project")
+    cli.mcp_manager = SimpleNamespace(discover=lambda: [])
+
+    overrides = cli._codex_mcp_transport_overrides(
+        "Open the CooCooBabys wp-admin, inspect plugins, and update settings."
+    )
+
+    bridge = overrides["advertpreneur-browser"]
+    assert bridge["enabled"] is True
+    assert bridge["command"]
+    assert bridge["args"][:2] == ["-m", "advertpreneur_cli.browser_mcp"]
+    assert bridge["args"][-1] == "D:\\site-project"
+
+
+def test_browser_mcp_exposes_live_site_controls_but_not_delete_actions():
+    names = {tool["name"] for tool in BrowserMCPServer.tools()}
+    assert {"browser_navigate", "browser_inspect", "browser_click", "browser_fill", "browser_upload"} <= names
+    assert not any("delete" in name or "remove" in name for name in names)
 
 
 def test_agy_current_usage_json_uses_raw_fraction_and_correct_pool(tmp_path: Path):

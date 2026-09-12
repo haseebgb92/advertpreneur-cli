@@ -1,6 +1,13 @@
-# Advertpreneur CLI v0.20.2
+# Advertpreneur CLI v0.20.3
 
 Advertpreneur CLI (`advertpreneur` or `adp`) is a Windows-first coding and site-operations CLI. It can use Ollama/Ollama Cloud, OpenAI Codex, and Google Antigravity while keeping project discovery, context planning, evidence, packaging, resource checks, WordPress/browser operations, and most orchestration local.
+
+## v0.20.3 — Codex-controlled live-site browser work
+
+- Codex live-site tasks now receive an Advertpreneur-owned local Browser Bridge MCP server automatically when the request mentions WordPress, wp-admin, Hostinger, hosting panels, uploads, posts/pages, plugins/themes, or site settings.
+- `browser_navigate` creates and focuses the controlled Edge/Chrome tab through the extension; it does not require a manually connected tab or a pasted CLI command.
+- Codex can inspect, navigate, fill, click, upload project-local files, and verify the observed browser state. It must pause only for browser login or an explicit deletion proposal approval.
+- The MCP server cannot delete or remove items. WordPress deletion remains a reviewed two-step operation.
 
 ## v0.20.2 — GitHub releases and verified terminal updates
 
@@ -257,7 +264,7 @@ The browser workflow supports **WordPress wp-admin**, **Hostinger hPanel File Ma
 
 Adapters open only supported routes and reuse the visible browser session. They do not bypass host login or authorization; confirm the displayed panel and resulting listing after every live mutation.
 
-For ordinary natural-language work, these commands are not required. When a task mentions a supported host, wp-admin, a WordPress upload, posts/pages, or site settings, Advertpreneur exposes browser control to its agent, starts the bridge when needed, detects the site adapter after navigation, and continues the workflow itself. It only pauses when the visible browser reports that you must complete a login or approve a destructive proposal.
+For ordinary natural-language work, these commands are not required. When a task mentions a supported host, wp-admin, a WordPress upload, posts/pages, or site settings, Advertpreneur exposes browser control to its agent, starts the bridge when needed, detects the site adapter after navigation, and continues the workflow itself. With Codex, this is a direct local MCP tool connection to the Browser Bridge, so Codex opens and controls its own tab rather than asking you to run a browser command. It only pauses when the visible browser reports that you must complete a login or approve a destructive proposal.
 
 Each detected site is classified as local, staging, or production and recorded without credentials in `.advertpreneur/operations.json`, along with current operation checkpoints and compact browser evidence. `/status` and the extension popup show the active operation surface so interrupted work can be resumed from its latest verified checkpoint.
 
