@@ -1,6 +1,25 @@
-# Advertpreneur CLI v0.15.1 — Project Intelligence + Resource Guard
+# Advertpreneur CLI v0.20.2
 
-Advertpreneur CLI (`adp`) is a lightweight Windows-first coding CLI that can use Ollama/Ollama Cloud, OpenAI Codex, and Google Antigravity while keeping project discovery, context planning, evidence, packaging, resource checks, and most orchestration local.
+Advertpreneur CLI (`advertpreneur` or `adp`) is a Windows-first coding and site-operations CLI. It can use Ollama/Ollama Cloud, OpenAI Codex, and Google Antigravity while keeping project discovery, context planning, evidence, packaging, resource checks, WordPress/browser operations, and most orchestration local.
+
+## v0.20.2 — GitHub releases and verified terminal updates
+
+- The private GitHub repository and Releases page are the authoritative distribution channel.
+- Every `v*` tag runs the release workflow: tests, Windows CLI ZIP, Browser Bridge ZIP, SHA-256 checksum file, and update manifest.
+- On startup, the CLI checks for a newer release in the background and shows a non-blocking update notice.
+- `/update` asks for approval, downloads through the user's GitHub CLI session, verifies the release SHA-256, updates the installed package, and asks for a restart.
+- The Browser Bridge is bundled in every CLI release. Its unpacked extension folder stays stable, so users load it once and click **Reload** only after an extension update.
+
+> This is a private repository. A user needs GitHub CLI access to `haseebgb92/advertpreneur-cli`; Advertpreneur never stores a GitHub token itself.
+
+## What it can do
+
+- Work in existing codebases with checkpoints, project maps, validation, packaging, review, and persistent evidence.
+- Operate a visible existing Chrome/Edge profile through Browser Bridge, including WordPress/wp-admin, hosting panels, file upload staging, plugins, themes, pages, posts, and settings.
+- Keep WordPress credentials in the browser's own saved-password/session system; the CLI does not request or store passwords.
+- Route work to proactive specialist roles and keep production mutations behind explicit approval.
+
+## Previous releases
 
 ## V0.15.1 — lightweight Resource Guard
 
@@ -252,15 +271,23 @@ Due work stored in `.advertpreneur/workforce.json` wakes on the next interactive
 
 ## Install and update on Windows
 
-For the first private GitHub installation, authenticate once with GitHub CLI, then download and run the release installer without manually extracting a ZIP:
+For the first private GitHub installation, install GitHub CLI if needed, authenticate once, then download and run the release installer without manually extracting a ZIP:
 
 ```powershell
+winget install --id GitHub.cli -e
 gh auth login -h github.com
 gh release download latest --repo haseebgb92/advertpreneur-cli --pattern INSTALL.ps1 --dir $env:TEMP
 & "$env:TEMP\INSTALL.ps1" -FromGitHub
 ```
 
-The installer downloads the release archive, verifies its SHA-256 checksum, installs the CLI, and refreshes the Browser Bridge in its stable unpacked folder under `~/.advertpreneur-cli/browser-extension`.
+The installer downloads the release archive, verifies its SHA-256 checksum, installs the CLI, and refreshes the Browser Bridge in its stable unpacked folder under `~/.advertpreneur-cli/browser-extension`. It preserves existing sessions, history, evidence, settings, and provider credentials.
+
+### Install the Browser Bridge once
+
+1. Start `advertpreneur` once after installation.
+2. In the CLI, run `/bridge extension` to show the stable extension folder.
+3. Open `chrome://extensions` or `edge://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder.
+4. After a CLI release that changes the extension, return to that browser page and click **Reload**. Do not load another ZIP or choose a new folder.
 
 After that, start the CLI normally. It checks GitHub Releases in the background and displays an update notice when a newer version is available. Run:
 
@@ -287,7 +314,7 @@ advertpreneur --version
 Expected:
 
 ```text
-0.20.0
+0.20.2
 ```
 
 Existing login/session/history/evidence/provider state under `~/.advertpreneur-cli` is preserved. The installer removes no provider credentials. On first v0.15 start, obsolete Beacon state/status files are cleaned locally.
@@ -303,6 +330,7 @@ Existing login/session/history/evidence/provider state under `~/.advertpreneur-c
 /verify                 safe changed-file verification
 /verify full            full inferred project validation/build
 /package                build/verify a clean release ZIP
+/update                 check, verify and install the latest GitHub release
 /index                   update deterministic project map
 /map <query>             search project map
 /handbook <query>        search validated local experience
