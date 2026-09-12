@@ -92,6 +92,7 @@ class TuiTests(unittest.TestCase):
         rendered = output.getvalue()
         self.assertIn("Advertpreneur is acting", rendered)
         self.assertNotIn("gemini-3.7-flash", rendered)
+        self.assertIn("Message Advertpreneur", rendered)
         self.assertIn(ui._joke, rendered)
         self.assertIn("STATUS BAR", rendered)
 

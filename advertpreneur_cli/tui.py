@@ -587,6 +587,7 @@ class TerminalUI:
         frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         frame = frames[int(elapsed * 10) % len(frames)]
         bar = self._plain_toolbar(self.toolbar())
+        composer = "  ╭─ Message Advertpreneur ─────────────────────────────────────────────╮"
         activity = {
             "action": "acting",
             "coding": "working",
@@ -599,17 +600,19 @@ class TerminalUI:
             file_part = f" · {self._live_detail}" if getattr(self, "_live_detail", "") else ""
             working = f" {frame} Advertpreneur is working{file_part} · {elapsed:.1f}s"
             sys.stdout.write("\r\x1b[2K" + self._fit(working, width) + "\n")
+            sys.stdout.write("\r\x1b[2K\x1b[38;2;215;217;222m" + self._fit(composer, width) + "\x1b[0m\n")
             sys.stdout.write("\r\x1b[2K\x1b[38;2;138;143;152m" + self._fit(f"  {self._joke}", width) + "\x1b[0m\n")
             sys.stdout.write("\r\x1b[2K\x1b[48;2;35;37;42m\x1b[38;2;215;217;222m" + self._fit(bar, width) + "\x1b[0m\n")
-            self._live_lines_drawn = 3
+            self._live_lines_drawn = 4
         else:
             detail = f" · {self._live_detail}" if getattr(self, "_live_detail", "") else ""
             working = f" {frame} Advertpreneur is {activity}{detail} · {elapsed:.1f}s"
             second = f"  {self._joke}"
             sys.stdout.write("\r\x1b[2K" + self._fit(working, width) + "\n")
+            sys.stdout.write("\r\x1b[2K\x1b[38;2;215;217;222m" + self._fit(composer, width) + "\x1b[0m\n")
             sys.stdout.write("\r\x1b[2K\x1b[38;2;138;143;152m" + self._fit(second, width) + "\x1b[0m\n")
             sys.stdout.write("\r\x1b[2K\x1b[48;2;35;37;42m\x1b[38;2;215;217;222m" + self._fit(bar, width) + "\x1b[0m\n")
-            self._live_lines_drawn = 3
+            self._live_lines_drawn = 4
         sys.stdout.flush()
         self._live_drawn = True
 
@@ -624,7 +627,7 @@ class TerminalUI:
         self._live_detail = ""
         self._live_event_driven = False
         self._live_compact = bool(compact)
-        self._live_lines_drawn = 3
+        self._live_lines_drawn = 4
         self._state_changed = self._live_started
 
         def worker() -> None:
@@ -767,7 +770,7 @@ class TerminalUI:
         print()
 
     def prompt(self) -> str:
-        return self._safe_prompt_call(lambda: self.session.prompt(HTML("<prompt>› </prompt>")))
+        return self._safe_prompt_call(lambda: self.session.prompt(HTML("<muted>╭─ Message Advertpreneur ─</muted>\n<prompt>› </prompt>")))
 
     def _menu_toolbar(self) -> FormattedText:
         parts: list[tuple[str, str]] = [("class:joke", f"  {self._joke}\n")]
