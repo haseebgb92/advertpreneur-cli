@@ -13,10 +13,13 @@ if ($FromGitHub) {
     $stage = Join-Path $downloadRoot ("install-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     try {
-        & gh release download latest --repo $Repository --pattern "update-manifest.json" --dir $stage --clobber
+        $release = (& gh api "repos/$Repository/releases/latest" | ConvertFrom-Json)
+        $releaseTag = [string]$release.tag_name
+        if (-not $releaseTag) { throw "GitHub did not return a latest release tag." }
+        & gh release download $releaseTag --repo $Repository --pattern "update-manifest.json" --dir $stage --clobber
         $manifest = Get-Content (Join-Path $stage "update-manifest.json") -Raw | ConvertFrom-Json
         if (-not $manifest.asset -or -not $manifest.sha256) { throw "Release manifest is invalid." }
-        & gh release download latest --repo $Repository --pattern $manifest.asset --dir $stage --clobber
+        & gh release download $releaseTag --repo $Repository --pattern $manifest.asset --dir $stage --clobber
         $archive = Join-Path $stage $manifest.asset
         $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
         if ($actual -ne ([string]$manifest.sha256).ToLowerInvariant()) { throw "Release checksum verification failed." }

@@ -17,6 +17,11 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertIn("INSTALL.ps1", names)
         self.assertIn("pyproject.toml", names)
 
+    def test_github_bootstrap_resolves_the_actual_latest_tag(self):
+        installer = (Path.cwd() / "INSTALL.ps1").read_text(encoding="utf-8")
+        self.assertIn("releases/latest", installer)
+        self.assertIn("gh release download $releaseTag", installer)
+
 
 if __name__ == "__main__":
     unittest.main()
