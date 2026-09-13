@@ -62,6 +62,8 @@ class ExternalActionGateway:
             "for example ```adp_action {\"tool\":\"browser\",\"args\":{\"action\":\"status\"}} ``` . "
             "ADP executes the action and returns observed evidence in `adp_action_result`; inspect it before requesting one next action or finishing. "
             "Use browser actions yourself for live panels. Never ask for credentials: if the result says `Login needed in browser`, stop and wait. "
+            "For Amazon/Helium 10 keyword research, create one local run with browser `research_start`, verify the first search/export through `research_search` and `research_export`, then use `research_run` to process the saved-selector queue one keyword at a time. "
+            "If ADP reports a sign-in, MFA, CAPTCHA, traffic, access, rate, or verification checkpoint, stop immediately and wait; never attempt to bypass it. "
             "Never delete or remove content directly; request a deletion proposal and stop until its explicit approval is returned. "
             + worker_ownership_contract()
         )
@@ -105,6 +107,7 @@ class ExternalActionGateway:
         return any(marker in low for marker in (
             "login needed in browser", "requires approved proposal", "deletion requires",
             "approval required", "user declined", "user canceled",
+            "research checkpoint", "research paused",
         ))
 
     @staticmethod

@@ -1,6 +1,14 @@
-# Advertpreneur CLI v0.21.3
+# Advertpreneur CLI v0.21.4
 
 Advertpreneur CLI (`advertpreneur` or `adp`) is a Windows-first coding and site-operations CLI. It can use Ollama/Ollama Cloud, OpenAI Codex, and Google Antigravity while keeping project discovery, context planning, evidence, packaging, resource checks, WordPress/browser operations, and most orchestration local.
+
+## v0.21.4 — compliant Amazon / Helium 10 Xray research runs
+
+- ADP can turn provided product samples into a model-generated keyword list, then run a visible, one-keyword-at-a-time Amazon / Helium 10 workflow through the connected Browser Bridge.
+- Each run keeps a resumable local CSV ledger in `.advertpreneur/research/<run>/keywords.csv`, records completed reports, and moves/renames each downloaded Xray export into that run’s `reports/` folder.
+- The first verified search/export records only its successful observed selectors for reuse; the remaining queue can then run one keyword at a time without rediscovery or a model turn per keyword. Failed actions and completed downloads remain visible in the local ledger.
+- Browser Bridge now observes export downloads directly. Reload the already-installed extension once after this update so its new `downloads` permission is active.
+- Sign-in, MFA, CAPTCHA, access, traffic, or rate warnings are hard checkpoints. ADP never handles credentials, solves challenges, rotates IPs, or disguises automation.
 
 ## v0.21.3 — AGY model-defined thinking
 
@@ -371,7 +379,7 @@ advertpreneur --version
 Expected:
 
 ```text
-0.21.3
+0.21.4
 ```
 
 Existing login/session/history/evidence/provider state under `~/.advertpreneur-cli` is preserved. The installer removes no provider credentials. On first v0.15 start, obsolete Beacon state/status files are cleaned locally.

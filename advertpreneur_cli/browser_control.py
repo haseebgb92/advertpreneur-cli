@@ -548,6 +548,27 @@ class BrowserController:
         self.routines.record("wait", {"milliseconds": ms}, {"verified": True, "url": self.current_url})
         return result
 
+    def mark_download(self) -> int:
+        """Capture the newest download id before a visible export click.
+
+        Download observation is only available through the connected Browser Bridge;
+        an isolated fallback browser must not be used for authenticated research.
+        """
+        if not self._extension_available(wait_seconds=0.8):
+            raise BrowserUnavailable("Research downloads require the connected Advertpreneur Browser Bridge extension")
+        row = self._extension_call("download_mark", timeout=12)
+        return int(row.get("marker") or row.get("download_id") or 0)
+
+    def wait_for_download(self, marker: int, timeout_seconds: int = 45) -> Path:
+        if not self._extension_available(wait_seconds=0.8):
+            raise BrowserUnavailable("Research downloads require the connected Advertpreneur Browser Bridge extension")
+        timeout_ms = max(1_000, min(120_000, int(timeout_seconds) * 1000))
+        row = self._extension_call("download_wait", timeout=(timeout_ms / 1000) + 12, marker=int(marker), timeout_ms=timeout_ms)
+        filename = str(row.get("filename") or "")
+        if not filename:
+            raise BrowserUnavailable("Browser Bridge completed a download without a local filename")
+        return Path(filename)
+
     def learn_start(self, name: str) -> str:
         actual = self.routines.start(name)
         # Clear any stale human events and arm the existing-browser recorder.

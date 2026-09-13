@@ -22,6 +22,29 @@ function storageSet(key, value) {
 }
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
+function searchDownloads(query = {}) {
+  return new Promise((resolve, reject) => chrome.downloads.search(query, (items) => {
+    const error = chrome.runtime.lastError;
+    if (error) reject(new Error(error.message)); else resolve(items || []);
+  }));
+}
+
+async function newestDownloadId() {
+  const items = await searchDownloads({ orderBy: ["-id"], limit: 1 });
+  return Number(items[0]?.id || 0);
+}
+
+async function waitForCompletedDownload(marker, timeoutMs) {
+  const deadline = Date.now() + Math.max(1000, Math.min(120000, Number(timeoutMs || 45000)));
+  while (Date.now() < deadline) {
+    const items = await searchDownloads({ orderBy: ["-id"], limit: 30 });
+    const item = items.find((row) => Number(row.id || 0) > Number(marker || 0) && row.state === "complete" && row.filename);
+    if (item) return item;
+    await sleep(400);
+  }
+  throw new Error("Timed out waiting for a completed browser download");
+}
+
 async function bridgeFetch(path, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Number(options.timeoutMs || 25000));
@@ -277,6 +300,17 @@ async function browserCommand(command) {
     return { provider: "existing-edge/extension", learning: false, tab_id: tab?.id || 0, url: tab?.url || "", title: tab?.title || "", verified: true };
   }
   let tab = await ensureControlledTab();
+  if (action === "download_mark") {
+    const marker = await newestDownloadId();
+    return {provider:"existing-edge/extension", marker, verified:true};
+  }
+  if (action === "download_wait") {
+    await setControlBar(tab.id, "Advertpreneur · waiting for download", "working");
+    const item = await waitForCompletedDownload(args.marker, args.timeout_ms);
+    tab = await chrome.tabs.get(tab.id); await setControlBar(tab.id, "Advertpreneur is controlling this tab", "active");
+    await reportProgress("download_completed", item.filename || "", tab);
+    return {provider:"existing-edge/extension", download_id:item.id, filename:item.filename, state:item.state, url:tab.url || "", title:tab.title || "", verified:true};
+  }
   if (action === "wordpress_state") {
     tab = await chrome.tabs.get(tab.id); const state = await wordpressState(tab.id);
     await reportProgress(state.login_needed ? "login_needed" : (state.authenticated ? "authenticated" : "wordpress_unknown"), state.notices?.[0] || "", tab);

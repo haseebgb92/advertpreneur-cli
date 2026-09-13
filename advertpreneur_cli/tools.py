@@ -13,6 +13,7 @@ from .wp_workspace import WordPressWorkspace, WorkspaceError
 from .site_adapters import SiteAdapterRegistry, SiteAdapterError, SiteProfile
 from .operations import OperationLedger, ProjectIdentity
 from .panel_playbooks import PanelPlaybookRegistry, PlaybookError
+from .research_workflow import ResearchRun
 
 if TYPE_CHECKING:
     from .resource_guard import ResourceGuard
@@ -81,7 +82,7 @@ RESEARCH_SCHEMAS = [
 
 BROWSER_SCHEMAS = [
     tool_schema("browser", "Control the user's local browser. Prefer measured reverse-engineering over visual guessing. Browser actions must be verified by observable state. Learned routines replay deterministic browser steps without model rediscovery.", {
-        "action": {"type": "string", "enum": ["status", "operations_status", "navigate", "open", "site_detect", "site_profile", "site_playbook", "site_open", "site_upload", "inspect", "screenshot", "reverse_engineer", "click", "fill", "scroll", "wait", "upload", "wordpress_state", "workspace_list", "workspace_stage", "workspace_zip", "workspace_extract", "workspace_move", "wordpress_propose_delete", "wordpress_approve_delete", "wordpress_delete", "run_routine", "routine_list", "close"]},
+        "action": {"type": "string", "enum": ["status", "operations_status", "navigate", "open", "site_detect", "site_profile", "site_playbook", "site_open", "site_upload", "inspect", "screenshot", "reverse_engineer", "click", "fill", "scroll", "wait", "upload", "wordpress_state", "workspace_list", "workspace_stage", "workspace_zip", "workspace_extract", "workspace_move", "wordpress_propose_delete", "wordpress_approve_delete", "wordpress_delete", "research_start", "research_status", "research_search", "research_export", "research_run", "research_pause", "research_resume", "run_routine", "routine_list", "close"]},
         "url": {"type": "string"}, "selector": {"type": "string"}, "name": {"type": "string"},
         "value": {"type": "string"}, "amount": {"type": ["integer", "string"]}, "milliseconds": {"type": "integer"}, "repeat": {"type": "integer"},
         "max_elements": {"type": "integer"}, "full_page": {"type": "boolean"}, "file_path": {"type": "string"}, "proposal_id": {"type": "string"}, "approval_token": {"type": "string"},
@@ -232,7 +233,7 @@ class ToolRegistry:
         if any(x in text for x in research_terms) or {"web_search", "web_fetch"} & used:
             schemas.extend(RESEARCH_SCHEMAS)
 
-        browser_terms = ("browser", "website", "web page", "reference site", "screenshot", "reverse engineer", "reverse-engineer", "pixel", "design map", "navigate to", "open the site", "open website", "http://", "https://", "wp-admin", "wordpress", "hostinger", "cpanel", "plesk", "file manager", "upload plugin", "upload theme", "install plugin", "activate theme", "edit post", "edit page", "wordpress settings")
+        browser_terms = ("browser", "website", "web page", "reference site", "screenshot", "reverse engineer", "reverse-engineer", "pixel", "design map", "navigate to", "open the site", "open website", "http://", "https://", "wp-admin", "wordpress", "hostinger", "cpanel", "plesk", "file manager", "upload plugin", "upload theme", "install plugin", "activate theme", "edit post", "edit page", "wordpress settings", "amazon", "helium 10", "helium10", "xray report", "xray", "keyword research", "keywords")
         if any(x in text for x in browser_terms) or "browser" in used:
             schemas.extend(BROWSER_SCHEMAS)
         windows_terms = ("windows", "desktop", "local folder", "file explorer", "open folder", "open app", "launch app")
@@ -481,6 +482,33 @@ class ToolRegistry:
         self.operations.identity(ProjectIdentity.from_url(url, adapter.key))
         return f" · site adapter {adapter.key}"
 
+    @staticmethod
+    def _research_keywords(value: str) -> list[str]:
+        return [" ".join(row.split()) for row in re.split(r"[\r\n,]+", str(value or "")) if " ".join(row.split())]
+
+    @staticmethod
+    def _research_pause_reason(observation: str) -> str:
+        text = str(observation or "").lower()
+        warnings = (
+            ("verify you are human", "human verification page detected"),
+            ("validatecaptcha", "verification page detected"),
+            ("captcha", "CAPTCHA page detected"),
+            ("unusual traffic", "traffic warning detected"),
+            ("access denied", "access warning detected"),
+            ("too many requests", "rate warning detected"),
+            ("rate limit", "rate warning detected"),
+            ("two-factor", "two-factor authentication is required"),
+            ("mfa", "multi-factor authentication is required"),
+            ("sign in", "sign-in is required"),
+            ("log in", "sign-in is required"),
+        )
+        return next((reason for needle, reason in warnings if needle in text), "")
+
+    def _research_run(self, name: str) -> ResearchRun:
+        if not str(name or "").strip():
+            raise ToolError("Research actions require a run name")
+        return ResearchRun.open(self.root, name)
+
     def tool_browser(
         self, action: str, url: str = "", selector: str = "", name: str = "design-map",
         value: str = "", amount: int | str = 650, milliseconds: int = 750, repeat: int = 1,
@@ -565,6 +593,124 @@ class ToolRegistry:
                 result = self.browser_controller.click(selector)
                 self._delete_proposals.pop(proposal_id, None)
                 return f"Deletion action dispatched after approved review · {result}"
+            if action == "research_start":
+                keywords = self._research_keywords(value)
+                if not keywords:
+                    raise ToolError("research_start requires a comma- or line-separated keyword list in value")
+                if not self.browser_controller._extension_available(wait_seconds=0.8):
+                    raise ToolError("Research runs require the connected Advertpreneur Browser Bridge extension and its existing browser session")
+                run = ResearchRun.create(self.root, name, keywords)
+                return json.dumps({"research_run": run.name, "ledger": str(run.ledger_path.relative_to(self.root)), **run.status()}, ensure_ascii=False)
+            if action == "research_status":
+                return json.dumps(self._research_run(name).status(), ensure_ascii=False)
+            if action == "research_pause":
+                run = self._research_run(name)
+                active = run.status()["active"]
+                if not active:
+                    raise ToolError("No active keyword to pause")
+                run.pause(str(active[0]), value or "Research paused", self.browser_controller.current_url)
+                return f"Research paused · {active[0]} · {value or 'Research paused'}"
+            if action == "research_resume":
+                if not value:
+                    raise ToolError("research_resume requires the paused keyword in value")
+                self._research_run(name).resume(value)
+                return f"Research resumed · {value}"
+            if action == "research_search":
+                run = self._research_run(name)
+                known = run.selectors()
+                selector = selector or known.get("search", "")
+                submit_selector = value or known.get("submit", "")
+                if not selector or not submit_selector:
+                    raise ToolError("research_search requires selector for the observed search field and value for the observed submit control")
+                observed = self.browser_controller.inspect("body", max_elements=80)
+                reason = self._research_pause_reason(observed)
+                if reason:
+                    raise ToolError(f"Research checkpoint: {reason}. Complete it in the browser, then retry this action.")
+                keyword = run.next_keyword()
+                if not keyword:
+                    return "Research run has no pending keywords"
+                try:
+                    self.browser_controller.fill(selector, keyword)
+                    self.browser_controller.click(submit_selector)
+                    self.browser_controller.wait(max(250, min(8_000, int(milliseconds))))
+                    after = self.browser_controller.inspect("body", max_elements=80)
+                    reason = self._research_pause_reason(after)
+                    if reason:
+                        run.pause(keyword, reason, self.browser_controller.current_url)
+                        return f"Research paused · {keyword} · {reason}"
+                    run.remember_selectors(search=selector, submit=submit_selector)
+                    return f"Research search submitted · {keyword} · ready for observed Xray export"
+                except Exception as exc:
+                    run.pause(keyword, f"search action failed: {exc}", self.browser_controller.current_url)
+                    raise
+            if action == "research_export":
+                run = self._research_run(name)
+                selector = selector or run.selectors().get("export", "")
+                if not selector:
+                    raise ToolError("research_export requires the observed Xray export selector")
+                active = run.status()["active"]
+                if not active:
+                    raise ToolError("No active keyword to export; use research_search first")
+                keyword = str(active[0])
+                observed = self.browser_controller.inspect("body", max_elements=80)
+                reason = self._research_pause_reason(observed)
+                if reason:
+                    run.pause(keyword, reason, self.browser_controller.current_url)
+                    return f"Research paused · {keyword} · {reason}"
+                try:
+                    marker = self.browser_controller.mark_download()
+                    self.browser_controller.click(selector)
+                    source = self.browser_controller.wait_for_download(marker, timeout_seconds=max(5, min(120, int(milliseconds))))
+                    target = run.complete_download(keyword, source, self.browser_controller.current_url)
+                    run.remember_selectors(export=selector)
+                    return f"Xray report recorded · {keyword} · {target.relative_to(self.root).as_posix()}"
+                except Exception as exc:
+                    run.pause(keyword, f"export action failed: {exc}", self.browser_controller.current_url)
+                    raise
+            if action == "research_run":
+                run = self._research_run(name)
+                known = run.selectors()
+                missing = [label for label in ("search", "submit", "export") if not known.get(label)]
+                if missing:
+                    raise ToolError("research_run needs successful observed selectors first: " + ", ".join(missing))
+                before = len(run.status()["completed"])
+                while True:
+                    active = run.status()["active"]
+                    if active:
+                        keyword = str(active[0])
+                    else:
+                        observed = self.browser_controller.inspect("body", max_elements=80)
+                        reason = self._research_pause_reason(observed)
+                        if reason:
+                            return f"Research checkpoint · {reason} · {len(run.status()['completed']) - before} completed"
+                        keyword = run.next_keyword()
+                        if not keyword:
+                            return f"Research run complete · {len(run.status()['completed']) - before} completed · {len(run.status()['paused'])} paused"
+                        try:
+                            self.browser_controller.fill(known["search"], keyword)
+                            self.browser_controller.click(known["submit"])
+                            self.browser_controller.wait(max(250, min(8_000, int(milliseconds))))
+                            after = self.browser_controller.inspect("body", max_elements=80)
+                            reason = self._research_pause_reason(after)
+                            if reason:
+                                run.pause(keyword, reason, self.browser_controller.current_url)
+                                return f"Research paused · {keyword} · {reason} · {len(run.status()['completed']) - before} completed"
+                        except Exception as exc:
+                            run.pause(keyword, f"search action failed: {exc}", self.browser_controller.current_url)
+                            raise
+                    try:
+                        observed = self.browser_controller.inspect("body", max_elements=80)
+                        reason = self._research_pause_reason(observed)
+                        if reason:
+                            run.pause(keyword, reason, self.browser_controller.current_url)
+                            return f"Research paused · {keyword} · {reason} · {len(run.status()['completed']) - before} completed"
+                        marker = self.browser_controller.mark_download()
+                        self.browser_controller.click(known["export"])
+                        source = self.browser_controller.wait_for_download(marker, timeout_seconds=max(5, min(120, int(milliseconds))))
+                        run.complete_download(keyword, source, self.browser_controller.current_url)
+                    except Exception as exc:
+                        run.pause(keyword, f"export action failed: {exc}", self.browser_controller.current_url)
+                        raise
             if action == "inspect":
                 return self.browser_controller.inspect(selector or "body", max_elements=max_elements)
             if action == "screenshot":
