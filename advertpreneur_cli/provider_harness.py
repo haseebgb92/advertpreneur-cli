@@ -312,12 +312,23 @@ class _AgyStreamDriver:
         m = re.search(r"-(low|medium|high)$", str(model or "").strip().lower())
         return m.group(1) if m else ""
 
+    @staticmethod
+    def _uses_effort_flag(model: str) -> bool:
+        low = str(model or "").strip().lower()
+        return not (
+            _AgyStreamDriver._model_defined_effort(low)
+            or "claude" in low
+            or any(marker in low for marker in ("gpt-oss", "gpt_oss", "gptoss"))
+        )
+
     @property
     def effective_effort(self) -> str:
-        return self._model_defined_effort(self.model) or self.effort
+        if not self._uses_effort_flag(self.model):
+            return self._model_defined_effort(self.model)
+        return self.effort
 
     def compatible(self, cwd: Path, model: str, effort: str, write: bool) -> bool:
-        incoming = self._model_defined_effort(model) or effort
+        incoming = self._model_defined_effort(model) if not self._uses_effort_flag(model) else effort
         return self.cwd == cwd.resolve() and self.model == model and self.effective_effort == incoming and self.write == bool(write)
 
     def _argv(self) -> List[str]:
@@ -335,7 +346,7 @@ class _AgyStreamDriver:
         # AGY model slugs such as gemini-3.7-flash-medium already encode the
         # reasoning tier. Google treats --model <tiered-slug> + --effort as
         # conflicting selectors, so only pass --effort for non-tiered models.
-        if not self._model_defined_effort(self.model):
+        if self._uses_effort_flag(self.model):
             argv += ["--effort", self.effort]
         if self.resume_id:
             argv += ["--conversation", self.resume_id]
@@ -1370,8 +1381,19 @@ class ExternalProviderHarness:
         return m.group(1) if m else ""
 
     @classmethod
+    def agy_uses_effort_flag(cls, model: str) -> bool:
+        low = str(model or "").strip().lower()
+        return not (
+            cls.agy_model_effort(low)
+            or "claude" in low
+            or any(marker in low for marker in ("gpt-oss", "gpt_oss", "gptoss"))
+        )
+
+    @classmethod
     def agy_effective_effort(cls, model: str, requested: str) -> str:
-        return cls.agy_model_effort(model) or cls.normalize_effort(requested)
+        if not cls.agy_uses_effort_flag(model):
+            return cls.agy_model_effort(model)
+        return cls.normalize_effort(requested)
 
     @staticmethod
     def _command_activity(command: Any) -> tuple[str, str]:
@@ -2037,7 +2059,7 @@ class ExternalProviderHarness:
         argv=[command,"-p",prompt,"--output-format",fmt,"--print-timeout",f"{max(1,timeout//60)}m","--sandbox"]
         if write: argv += ["--mode=accept-edits"]
         if model.strip(): argv += ["--model",model.strip()]
-        if not self.agy_model_effort(model): argv += ["--effort",effort]
+        if self.agy_uses_effort_flag(model): argv += ["--effort",effort]
         if prior: argv += ["--conversation", prior]
         started=time.monotonic()
         if on_event is not None:

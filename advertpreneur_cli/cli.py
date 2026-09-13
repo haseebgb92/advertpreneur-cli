@@ -54,7 +54,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.21.2"
+VERSION = "0.21.3"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 
 
@@ -2874,8 +2874,7 @@ class AdvertpreneurCLI:
         ))
 
     def _agy_effective_effort(self, model: str, requested: str) -> str:
-        fixed = ExternalProviderHarness.agy_model_effort(model)
-        return fixed or ExternalProviderHarness.normalize_effort(requested)
+        return ExternalProviderHarness.agy_effective_effort(model, requested)
 
     @staticmethod
     def _provider_thread_should_rollover(run: ProviderRun) -> bool:
@@ -2979,7 +2978,7 @@ class AdvertpreneurCLI:
         # run_task already started the persistent live footer during local
         # preparation. Keep that renderer in place instead of swapping to the
         # compact provider variant, which hid the joke row between stages.
-        self.ui.set_working_state("Coding", model=model or provider, turn=1, detail=f"R:{effort}", event_driven=False)
+        self.ui.set_working_state("Coding", model=model or provider, turn=1, detail=(f"R:{effort}" if effort else ""), event_driven=False)
         def activity(event: ProviderActivity) -> None:
             # Keep the terminal calm: one live line only. Structured provider events
             # update the current file when known, while commands/reasoning do not
@@ -3007,7 +3006,7 @@ class AdvertpreneurCLI:
                     self.bridge.update_status(self.current_session.id, self.bridge_cli_token, "Working", bridge_detail, model or provider)
                 except Exception: pass
         if self.current_session.bridge_enabled:
-            try: self.bridge.update_status(self.current_session.id, self.bridge_cli_token, "Working", f"Starting · R:{effort}", model or provider)
+            try: self.bridge.update_status(self.current_session.id, self.bridge_cli_token, "Working", (f"Starting · R:{effort}" if effort else "Starting"), model or provider)
             except Exception: pass
         def action_activity(request) -> None:
             self._external_activity = f"Action · {request.tool}"
@@ -3473,8 +3472,9 @@ class AdvertpreneurCLI:
                 if (not run.session_reused) and run.context_input_tokens >= 5000:
                     task_est = self._estimated_text_tokens(task_text)
                     cold_bits = f" · cold bootstrap (task text ~{task_est:,} tok; provider/runtime context dominates first turn)"
+                effort_bit = f" · R:{run.reasoning_effort}" if run.reasoning_effort else ""
                 self.ui.muted(
-                    f"external {profile.provider} · {max(1, run.provider_turns)} provider turn(s) · R:{run.reasoning_effort or 'medium'} · "
+                    f"external {profile.provider} · {max(1, run.provider_turns)} provider turn(s){effort_bit} · "
                     f"{run.tool_calls} tools · "
                     + (f"{run.input_tokens:,} new in / {run.output_tokens:,} out" if run.cache_read_additive else f"{run.input_tokens:,} in / {run.output_tokens:,} out")
                     + cache_bits

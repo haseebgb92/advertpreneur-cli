@@ -151,18 +151,42 @@ def test_agy_stream_session_reuses_process_and_reports_per_turn_delta(tmp_path: 
 
 
 def test_agy_tiered_model_does_not_send_conflicting_effort_flag(tmp_path: Path, monkeypatch):
-    script = _exe(tmp_path / "agy", r'''
-        #!/usr/bin/env python3
-        import json
-        print(json.dumps({"conversation_id":"agy-fixed","status":"SUCCESS","response":"OK","duration_seconds":0,"usage":{"input_tokens":4,"output_tokens":1,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":5}}))
-    ''')
     h = ExternalProviderHarness(tmp_path / "app", tmp_path)
-    monkeypatch.setattr(h, "_which", lambda provider: str(script))
+    monkeypatch.setattr(h, "_which", lambda provider: "agy")
+    monkeypatch.setattr(
+        h,
+        "_run_capture",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"conversation_id":"agy-fixed","status":"SUCCESS","response":"OK","duration_seconds":0,"usage":{"input_tokens":4,"output_tokens":1,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":5}}),
+            stderr="",
+        ),
+    )
     run = h.run_agy("one", model="gemini-3.7-flash-medium", effort="low", cwd=tmp_path)
     assert run.ok
     assert run.reasoning_effort == "medium"
     assert "--model" in run.command and "gemini-3.7-flash-medium" in run.command
     assert "--effort" not in run.command
+
+
+def test_agy_claude_and_gpt_oss_do_not_send_unsupported_effort_flag(tmp_path: Path, monkeypatch):
+    h = ExternalProviderHarness(tmp_path / "app", tmp_path)
+    monkeypatch.setattr(h, "_which", lambda provider: "agy")
+    monkeypatch.setattr(
+        h,
+        "_run_capture",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({"conversation_id":"agy-fixed","status":"SUCCESS","response":"OK","duration_seconds":0,"usage":{"input_tokens":4,"output_tokens":1,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":5}}),
+            stderr="",
+        ),
+    )
+
+    for model in ("claude-sonnet-4-6", "gpt-oss-120b"):
+        run = h.run_agy("one", model=model, effort="medium", cwd=tmp_path)
+        assert run.ok
+        assert run.reasoning_effort == ""
+        assert "--effort" not in run.command
 
 
 def test_provider_thread_ids_survive_adp_session_save_and_load(tmp_path: Path):

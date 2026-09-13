@@ -1,6 +1,10 @@
-# Advertpreneur CLI v0.21.2
+# Advertpreneur CLI v0.21.3
 
 Advertpreneur CLI (`advertpreneur` or `adp`) is a Windows-first coding and site-operations CLI. It can use Ollama/Ollama Cloud, OpenAI Codex, and Google Antigravity while keeping project discovery, context planning, evidence, packaging, resource checks, WordPress/browser operations, and most orchestration local.
+
+## v0.21.3 — AGY model-defined thinking
+
+- Claude and GPT-OSS models selected through Antigravity now run without ADP passing an unsupported `--effort`/reasoning level. Their model-defined thinking stays entirely provider-owned; Gemini and other AGY models retain their existing effort selection.
 
 ## v0.21.2 — live change panel
 
@@ -367,7 +371,7 @@ advertpreneur --version
 Expected:
 
 ```text
-0.21.2
+0.21.3
 ```
 
 Existing login/session/history/evidence/provider state under `~/.advertpreneur-cli` is preserved. The installer removes no provider credentials. On first v0.15 start, obsolete Beacon state/status files are cleaned locally.
