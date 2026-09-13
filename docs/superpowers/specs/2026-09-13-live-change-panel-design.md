@@ -27,6 +27,12 @@ diff/checkpoint analysis. It shows no provider reasoning and does not infer
 file changes from model text. Before the first observed change it reports `No
 file changes observed yet`; non-Git work uses checkpoint paths where available.
 
+For Git projects, a daemon tracker samples the active checkpoint once per
+second with read-only Git diff/stat commands and updates the panel only when
+the observed rows change. This is intentionally separate from the 5 FPS
+renderer, which only repaints already-known UI state. Non-Git projects avoid
+repeated full manifests and show their final checkpoint paths when finalized.
+
 The panel is rendered within Prompt Toolkit's live composer surface. Its timer
 and spinner continue to repaint at five frames per second through application
 invalidation; no background ANSI cursor writes are permitted.

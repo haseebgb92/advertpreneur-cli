@@ -19,6 +19,7 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.mouse_events import MouseEventType
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import CompleteStyle, clear
 from prompt_toolkit.styles import Style
@@ -424,6 +425,8 @@ class TerminalUI:
         self._live_active = False
         self._live_drawn = False
         self._prompt_active = False
+        self._live_changes: list[tuple[str, int, int]] = []
+        self._live_changes_expanded = False
         self._live_started = 0.0
         self._live_label = "Thinking"
         self._live_model = ""
@@ -505,7 +508,7 @@ class TerminalUI:
             key_bindings=self.kb,
             bottom_toolbar=self._composer_toolbar,
             enable_history_search=True,
-            mouse_support=False,
+            mouse_support=True,
         )
         try:
             self.session.app.ttimeoutlen = 0.03
@@ -541,6 +544,7 @@ class TerminalUI:
         parts: list[tuple[str, str]] = []
         if self._live_active:
             parts.extend(self._live_status_parts())
+            parts.extend(self._live_change_parts())
         parts.append(("class:joke", f"  {self._joke}\n"))
         parts.extend(list(self.toolbar()))
         return FormattedText(parts)
@@ -560,6 +564,35 @@ class TerminalUI:
         }.get(str(self._live_label or "").lower(), str(self._live_label or "working").lower())
         detail = f" · {self._live_detail}" if getattr(self, "_live_detail", "") else ""
         return [("class:working", f"  {frame} Advertpreneur is {activity}{detail} · {elapsed:.1f}s\n")]
+
+    def set_live_changes(self, changes: Sequence[tuple[str, int, int]]) -> None:
+        normalized: list[tuple[str, int, int]] = []
+        for path, added, removed in changes[:12]:
+            normalized.append((str(path).replace("\\", "/"), max(0, int(added)), max(0, int(removed))))
+        with self._live_lock:
+            self._live_changes = normalized
+        self._invalidate_live()
+
+    def _live_change_parts(self) -> list[tuple[str, str]]:
+        changes = list(getattr(self, "_live_changes", []) or [])
+        count = len(changes)
+        added = sum(row[1] for row in changes)
+        removed = sum(row[2] for row in changes)
+        names = " · ".join(row[0] for row in changes[:3]) or "No file changes observed yet"
+        action = "click to collapse" if getattr(self, "_live_changes_expanded", False) else "click to expand"
+        parts = [("class:working", f"  {count} files · +{added} -{removed} · {names}  [{action}]\n", self._toggle_live_changes)]
+        if getattr(self, "_live_changes_expanded", False):
+            parts.extend(("class:muted", f"    {path}  +{file_added} -{file_removed}\n") for path, file_added, file_removed in changes[:8])
+        return parts
+
+    def _toggle_live_changes(self, mouse_event) -> None:
+        if mouse_event.event_type != MouseEventType.MOUSE_UP:
+            return
+        with self._live_lock:
+            if not self._live_changes:
+                return
+            self._live_changes_expanded = not self._live_changes_expanded
+        self._invalidate_live()
 
     def _invalidate_live(self) -> None:
         try:
@@ -664,6 +697,8 @@ class TerminalUI:
         self._live_model = model
         self._live_turn = turn
         self._live_detail = ""
+        self._live_changes = []
+        self._live_changes_expanded = False
         self._live_event_driven = False
         self._live_compact = bool(compact)
         self._live_lines_drawn = 4
@@ -721,6 +756,8 @@ class TerminalUI:
             self._erase_live_locked()
             self._live_active = False
             self._live_drawn = False
+            self._live_changes = []
+            self._live_changes_expanded = False
         self._live_thread = None
         self._invalidate_live()
 

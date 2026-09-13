@@ -82,7 +82,7 @@ class BrowserMCPServer:
         if method == "notifications/initialized":
             return None
         if method == "initialize":
-            return self._ok(request_id, {"protocolVersion": PROTOCOL_VERSION, "capabilities": {"tools": {}}, "serverInfo": {"name": "advertpreneur-browser", "version": "0.21.1"}})
+            return self._ok(request_id, {"protocolVersion": PROTOCOL_VERSION, "capabilities": {"tools": {}}, "serverInfo": {"name": "advertpreneur-browser", "version": "0.21.2"}})
         if method == "tools/list":
             return self._ok(request_id, {"tools": self.tools()})
         if method == "tools/call":

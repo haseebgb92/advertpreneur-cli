@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from advertpreneur_cli.cli import AdvertpreneurCLI
+from advertpreneur_cli.diff_intelligence import FileRisk
 
 
 class _UI:
@@ -28,6 +29,16 @@ class WorkingUiTests(unittest.TestCase):
         app.on_agent_event("task_start", {"model": "test-model"})
 
         self.assertEqual(app.ui.calls, [("set", ("Starting",), {"model": "test-model", "turn": 1})])
+
+    def test_live_change_rows_keep_observed_diff_counts(self):
+        risks = [
+            FileRisk("app.py", 8, 2, "low", "localized"),
+            FileRisk("README.md", 3, 0, "low", "localized"),
+        ]
+
+        rows = AdvertpreneurCLI._live_change_rows(risks) if hasattr(AdvertpreneurCLI, "_live_change_rows") else []
+
+        self.assertEqual(rows, [("app.py", 8, 2), ("README.md", 3, 0)])
 
 
 if __name__ == "__main__":

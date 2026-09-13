@@ -86,7 +86,7 @@ class TuiTests(unittest.TestCase):
         ui._live_compact = False
 
         with mock.patch("advertpreneur_cli.tui.time.monotonic", return_value=12.4):
-            rendered = "".join(text for _style, text in ui._composer_toolbar())
+            rendered = "".join(fragment[1] for fragment in ui._composer_toolbar())
 
         self.assertIn("Advertpreneur is acting", rendered)
         self.assertIn("browser", rendered)
@@ -105,6 +105,43 @@ class TuiTests(unittest.TestCase):
 
         ui._live_stop.wait.assert_has_calls([mock.call(0.2), mock.call(0.2)])
         ui.session.app.invalidate.assert_called_once()
+
+    def test_live_change_panel_renders_observed_file_summary(self):
+        ui = object.__new__(TerminalUI)
+        ui.toolbar = lambda: [("class:toolbar", " STATUS BAR ")]
+        ui._joke = "A stable joke row."
+        ui._live_active = True
+        ui._live_started = 0.0
+        ui._live_label = "Action"
+        ui._live_detail = "browser"
+        ui._live_changes = [("app.py", 8, 2), ("README.md", 3, 0)]
+        ui._live_changes_expanded = False
+
+        with mock.patch("advertpreneur_cli.tui.time.monotonic", return_value=12.4):
+            rendered = "".join(fragment[1] for fragment in ui._composer_toolbar())
+
+        self.assertIn("2 files", rendered)
+        self.assertIn("+11 -2", rendered)
+        self.assertIn("app.py", rendered)
+
+    def test_live_change_panel_expands_per_file_counts(self):
+        ui = object.__new__(TerminalUI)
+        ui._live_changes = [("app.py", 8, 2), ("README.md", 3, 0)]
+        ui._live_changes_expanded = True
+
+        rendered = "".join(fragment[1] for fragment in ui._live_change_parts())
+
+        self.assertIn("app.py  +8 -2", rendered)
+        self.assertIn("README.md  +3 -0", rendered)
+
+    def test_live_change_panel_header_has_a_mouse_toggle_handler(self):
+        ui = object.__new__(TerminalUI)
+        ui._live_changes = [("app.py", 8, 2)]
+        ui._live_changes_expanded = False
+
+        header = ui._live_change_parts()[0]
+
+        self.assertEqual(len(header), 3)
 
     def test_working_card_uses_advertpreneur_ownership_and_hides_model_name(self):
         ui = object.__new__(TerminalUI)

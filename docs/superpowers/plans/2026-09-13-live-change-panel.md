@@ -136,7 +136,13 @@ def _live_change_rows(risks) -> list[tuple[str, int, int]]:
     return [(str(item.path), max(0, int(item.added)), max(0, int(item.removed))) for item in risks[:12]]
 ```
 
-When an active checkpoint has changed files, run existing `diff_intelligence.analyze()` and call `self.ui.set_live_changes(...)` before task completion. If analysis is unavailable, call `set_live_changes([(path, 0, 0) ...])` from the checkpoint; the UI must display zero counts rather than inventing values. Reset the UI change state in `begin_working()` and `end_working()`.
+Add `CheckpointManager.live_changes()` that reads active Git `diff --numstat`
+against its checkpoint tree and includes untracked paths with zero counts. Start
+a daemon tracker when the task checkpoint starts; it samples at one-second
+intervals and calls `self.ui.set_live_changes(...)` only when rows change. Stop
+and join it before checkpoint finalization. If Git statistics are unavailable,
+the tracker does not invent counts; final checkpoint paths are sent as zero
+count rows. Reset the UI change state in `begin_working()` and `end_working()`.
 
 - [ ] **Step 4: Run the change tracking test**
 

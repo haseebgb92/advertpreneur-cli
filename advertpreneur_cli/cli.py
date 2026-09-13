@@ -54,7 +54,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.21.1"
+VERSION = "0.21.2"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 
 
@@ -3274,6 +3274,46 @@ class AdvertpreneurCLI:
             boundary=boundary,
         )
 
+    @staticmethod
+    def _live_change_rows(rows) -> list[tuple[str, int, int]]:
+        normalized: list[tuple[str, int, int]] = []
+        for row in rows[:12]:
+            if hasattr(row, "path"):
+                path, added, removed = row.path, row.added, row.removed
+            else:
+                path, added, removed = row
+            normalized.append((str(path).replace("\\", "/"), max(0, int(added)), max(0, int(removed))))
+        return normalized
+
+    def _start_live_change_tracking(self) -> None:
+        self._stop_live_change_tracking()
+        stop = threading.Event()
+        self._live_change_stop = stop
+
+        def track() -> None:
+            previous: list[tuple[str, int, int]] | None = None
+            while not stop.wait(1.0):
+                try:
+                    rows = self._live_change_rows(self.checkpoints.live_changes())
+                except Exception:
+                    continue
+                if rows != previous:
+                    previous = rows
+                    self.ui.set_live_changes(rows)
+
+        self._live_change_thread = threading.Thread(target=track, name="advertpreneur-live-changes", daemon=True)
+        self._live_change_thread.start()
+
+    def _stop_live_change_tracking(self) -> None:
+        stop = getattr(self, "_live_change_stop", None)
+        if stop:
+            stop.set()
+        thread = getattr(self, "_live_change_thread", None)
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=1.2)
+        self._live_change_stop = None
+        self._live_change_thread = None
+
     def run_task(
         self,
         raw: str,
@@ -3398,6 +3438,7 @@ class AdvertpreneurCLI:
                 try:
                     self.checkpoints.begin(raw)
                     checkpoint_started = True
+                    self._start_live_change_tracking()
                 except Exception as exc:
                     self.ui.muted(f"Checkpoint unavailable · {exc}")
 
@@ -3482,6 +3523,7 @@ class AdvertpreneurCLI:
             self.ui.error(result_text)
             self._record_task_in_session()
         finally:
+            self._stop_live_change_tracking()
             self.ui.end_working()
             hook_event = "post_success" if completed_ok and result_status == "completed" else "post_failure"
             for row in self.hooks.run(hook_event):

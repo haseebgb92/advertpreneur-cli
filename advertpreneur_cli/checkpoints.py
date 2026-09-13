@@ -163,6 +163,32 @@ class CheckpointManager:
             self._active = {"id": cid, "mode": "zip", "ref": str(archive), "label": label, "before_manifest": manifest}
         return cid
 
+    def live_changes(self) -> List[tuple[str, int, int]]:
+        """Return active Git checkpoint changes without creating a new snapshot."""
+        active = self._active
+        if not active or active.get("mode") != "git-tree":
+            return []
+        rows: dict[str, tuple[int, int]] = {}
+        try:
+            proc = self._run_git(["diff", "--numstat", str(active["before"]), "--"])
+            if proc.returncode != 0:
+                return []
+            for line in proc.stdout.splitlines():
+                added, removed, path = line.split("\t", 2)
+                rows[path.replace("\\", "/")] = (
+                    int(added) if added.isdigit() else 0,
+                    int(removed) if removed.isdigit() else 0,
+                )
+            untracked = self._run_git(["ls-files", "--others", "--exclude-standard"])
+            if untracked.returncode == 0:
+                for path in untracked.stdout.splitlines():
+                    path = path.strip().replace("\\", "/")
+                    if path:
+                        rows.setdefault(path, (0, 0))
+        except Exception:
+            return []
+        return [(path, added, removed) for path, (added, removed) in sorted(rows.items())][:200]
+
     def finalize(self) -> Checkpoint | None:
         active = self._active
         self._active = None
