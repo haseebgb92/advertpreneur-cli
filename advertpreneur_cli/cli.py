@@ -64,7 +64,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.28.6"
+VERSION = "0.28.7"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -2370,6 +2370,10 @@ class AdvertpreneurCLI:
                 self.ui.muted(f"Local index skipped · {exc}")
             return
 
+    def _automatic_checkpoint_allowed(self) -> bool:
+        """Avoid snapshotting an entire user profile before a normal task."""
+        return self.project != Path.home().resolve()
+
     def _maybe_auto_compact(self) -> None:
         current = self.agent.context_estimate_tokens()
         if current < self.auto_compact_tokens:
@@ -3733,6 +3737,9 @@ class AdvertpreneurCLI:
                 pass
             for row in self.hooks.run("pre_task"):
                 self.ui.muted("hook · " + row)
+            if checkpoint and not self.plan_mode and not self._automatic_checkpoint_allowed():
+                self.ui.muted("Checkpoint skipped: home-directory workspace; use /project for a codebase before editing")
+                checkpoint = False
             if checkpoint and not self.plan_mode:
                 try:
                     self.checkpoints.begin(raw)

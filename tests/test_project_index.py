@@ -61,3 +61,12 @@ def test_auto_index_does_not_block_tasks_when_workspace_is_home_directory():
     cli._ensure_project_index()
 
     assert messages == ["Local index skipped: home-directory workspace; use /project for a codebase or /index to run it manually"]
+
+
+def test_home_directory_workspace_disables_automatic_checkpoints():
+    from advertpreneur_cli.cli import AdvertpreneurCLI
+
+    cli = object.__new__(AdvertpreneurCLI)
+    cli.project = Path.home().resolve()
+
+    assert cli._automatic_checkpoint_allowed() is False
