@@ -11,7 +11,7 @@ from typing import Any
 
 STEP_STATES = {"pending", "active", "waiting", "verified", "failed", "skipped"}
 _ALLOWED_TRANSITIONS = {
-    "pending": {"active", "verified", "skipped"},
+    "pending": {"active", "waiting", "verified", "skipped"},
     "active": {"waiting", "verified", "failed", "skipped"},
     "waiting": {"active", "failed", "skipped"},
     "verified": set(),
@@ -87,6 +87,31 @@ class Mission:
         )
 
 
+@dataclass
+class AttentionRequest:
+    id: str
+    mission_id: str
+    step_id: str
+    reason: str
+    options: list[str]
+    created_at: str
+    resolved_at: str = ""
+    response: str = ""
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "AttentionRequest":
+        return cls(
+            id=str(value.get("id") or ""),
+            mission_id=str(value.get("mission_id") or ""),
+            step_id=str(value.get("step_id") or ""),
+            reason=str(value.get("reason") or "attention"),
+            options=[str(item) for item in value.get("options", [])],
+            created_at=str(value.get("created_at") or _now()),
+            resolved_at=str(value.get("resolved_at") or ""),
+            response=str(value.get("response") or ""),
+        )
+
+
 class MissionStore:
     """Project-local mission snapshots with append-only lifecycle events."""
 
@@ -100,6 +125,23 @@ class MissionStore:
 
     def _events_path(self, mission_id: str) -> Path:
         return self.directory / f"{mission_id}.jsonl"
+
+    @property
+    def _attention_path(self) -> Path:
+        return self.directory / "attention.json"
+
+    def _load_attention(self) -> list[AttentionRequest]:
+        try:
+            raw = json.loads(self._attention_path.read_text(encoding="utf-8"))
+            return [AttentionRequest.from_dict(item) for item in raw if isinstance(item, dict)]
+        except Exception:
+            return []
+
+    def _save_attention(self, rows: list[AttentionRequest]) -> None:
+        target = self._attention_path
+        temporary = target.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps([asdict(row) for row in rows[-200:]], indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(temporary, target)
 
     def _save(self, mission: Mission, event: str, payload: dict[str, Any]) -> Mission:
         mission.updated_at = _now()
@@ -181,3 +223,38 @@ class MissionStore:
             step.state = "verified"
             self._save(mission, "step_verified", {"step_id": step_id})
         return True
+
+    def request_attention(self, mission_id: str, step_id: str, reason: str, options: list[str]) -> AttentionRequest:
+        mission = self.load(mission_id)
+        step = next((entry for entry in mission.steps if entry.id == step_id), None)
+        if step is None:
+            raise KeyError(f"Unknown mission step: {step_id}")
+        if step.state != "waiting":
+            self.transition_step(mission_id, step_id, "waiting")
+            mission = self.load(mission_id)
+        request = AttentionRequest(uuid.uuid4().hex, mission_id, step_id, str(reason), [str(item) for item in options], _now())
+        rows = self._load_attention()
+        rows.append(request)
+        self._save_attention(rows)
+        return request
+
+    def resolve_attention(self, request_id: str, response: str) -> AttentionRequest:
+        rows = self._load_attention()
+        request = next((item for item in rows if item.id == request_id), None)
+        if request is None:
+            raise KeyError(f"Unknown attention request: {request_id}")
+        if request.resolved_at:
+            return request
+        if response not in request.options:
+            raise ValueError(f"Unsupported attention response: {response}")
+        request.response = response
+        request.resolved_at = _now()
+        mission = self.load(request.mission_id)
+        step = next((entry for entry in mission.steps if entry.id == request.step_id), None)
+        if step is None:
+            raise KeyError(f"Unknown mission step: {request.step_id}")
+        step.state = "active" if response in {"approve", "continue", "resume"} else "failed"
+        mission.status = "active" if step.state == "active" else "failed"
+        self._save(mission, "attention_resolved", {"request_id": request.id, "response": response})
+        self._save_attention(rows)
+        return request

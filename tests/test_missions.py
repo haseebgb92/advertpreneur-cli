@@ -35,3 +35,20 @@ def test_code_step_requires_checkpoint_and_verification_evidence(tmp_path):
     assert store.verify_step(mission.id, step.id) is False
     store.record_evidence(mission.id, step.id, EvidenceItem("verification", "pytest:pass"))
     assert store.verify_step(mission.id, step.id) is True
+
+
+def test_attention_pauses_only_its_mission_and_resume_targets_same_step(tmp_path):
+    store = MissionStore(tmp_path)
+    mission = store.create("Upload", [{"title": "Confirm upload", "kind": "browser"}])
+    request = store.request_attention(
+        mission.id,
+        mission.steps[0].id,
+        "approval",
+        ["approve", "deny"],
+    )
+
+    assert store.load(mission.id).status == "waiting"
+    store.resolve_attention(request.id, "approve")
+    resumed = store.load(mission.id)
+    assert resumed.steps[0].state == "active"
+    assert resumed.status == "active"
