@@ -52,12 +52,12 @@ from .verification import ProportionalVerifier
 from .diff_intelligence import DiffIntelligence
 from .packaging import ProjectPackager
 from .workforce import Workforce
-from .missions import MissionStore
+from .missions import MissionStore, mission_steps_from_task_plan
 from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply_latest_update, release_is_newer
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.21.5"
+VERSION = "0.22.0"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -263,6 +263,15 @@ class AdvertpreneurCLI:
             "evidence": f"{observed}/{required}",
         })
 
+    def _begin_task_mission(self, request: str) -> str:
+        """Persist the deterministic local plan before provider execution begins."""
+        mission = self.missions.create(str(request), mission_steps_from_task_plan(self._current_task_plan))
+        self._current_mission_id = mission.id
+        if mission.steps:
+            self.missions.transition_step(mission.id, mission.steps[0].id, "active")
+        self._refresh_mission_cockpit()
+        return mission.id
+
     def _bootstrap_explicit_browser_tabs(self, instruction: str) -> bool:
         """Open an explicitly requested research site before a provider can stall on planning."""
         urls = re.findall(r"https?://[^\s<>'\"]+", str(instruction or ""), flags=re.I)
@@ -317,6 +326,10 @@ class AdvertpreneurCLI:
         """
         with self._task_lock:
             self._task_thread = None
+        try:
+            self.ui._task_active = False
+        except Exception:
+            pass
         try:
             self.ui.interrupt_prompt(_TASK_DONE_WAKE)
         except Exception:
@@ -3082,6 +3095,11 @@ class AdvertpreneurCLI:
             # Keep the terminal calm: one live line only. Structured provider events
             # update the current file when known, while commands/reasoning do not
             # replace the stable "coding" status with noisy transient phrases.
+            if event.kind == "thinking":
+                # Heartbeat from AGY during a silent reasoning phase: update the
+                # spinner label with elapsed time so the TUI doesn't appear frozen.
+                self.ui.set_working_state("Thinking", model=model or provider, detail=str(event.detail or ""), event_driven=True)
+                return
             if event.kind == "tool":
                 self._external_tool_calls += 1
             detail = str(event.detail or "").strip()
@@ -3486,6 +3504,12 @@ class AdvertpreneurCLI:
             self._current_task_plan = self.task_planner.plan(raw)
         except Exception:
             self._current_task_plan = None
+        try:
+            self._begin_task_mission(raw)
+        except Exception as exc:
+            # A mission record is a control-plane requirement, but preserve the
+            # existing task path if a local filesystem problem prevents storage.
+            self.ui.muted(f"Mission persistence unavailable · {exc}")
         self._resource_preflight_task(profile)
         specialist = self.workforce.select(raw)
         task_text = self.workforce.context(raw) + "\n\n" + raw
@@ -4264,7 +4288,20 @@ class AdvertpreneurCLI:
                     continue
                 immediate = raw.startswith("\x00ADP_IMMEDIATE\x00")
                 raw = raw.removeprefix("\x00ADP_IMMEDIATE\x00").strip()
-                if raw:
+                if immediate and not raw:
+                    # Escape pressed on an empty composer while a task is running.
+                    # Request a yield/stop without queuing any follow-up message.
+                    self._yield_requested.set()
+                    interrupted = False
+                    try:
+                        interrupted = bool(self.provider_harness.interrupt_active())
+                    except Exception:
+                        pass
+                    self.ui.muted(
+                        "Stopping current task · Escape pressed"
+                        if interrupted else "Yield requested · stopping at the next safe boundary"
+                    )
+                elif raw:
                     self._queued_messages.put((immediate, raw))
                     if immediate:
                         self._yield_requested.set()
@@ -4321,6 +4358,10 @@ class AdvertpreneurCLI:
                     with self._task_lock:
                         self._yield_requested.clear()
                         self._task_thread = threading.Thread(target=worker, args=(raw,), name="advertpreneur-task", daemon=True)
+                        try:
+                            self.ui._task_active = True
+                        except Exception:
+                            pass
                         self._task_thread.start()
                     # Keep the composer active while the task thread runs. The
                     # next iteration accepts queued or priority messages.

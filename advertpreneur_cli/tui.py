@@ -435,6 +435,9 @@ class TerminalUI:
         self._joke_changed = time.monotonic()
         self._state_changed = 0.0
         self._cockpit: dict[str, str] = {}
+        # Set True by the CLI while a task thread is live so the Escape binding
+        # knows whether an empty-buffer stop signal is meaningful.
+        self._task_active = False
 
         @self.kb.add("c-l")
         def _(event) -> None:
@@ -488,6 +491,15 @@ class TerminalUI:
                 # a task is active. It is intentionally never shown to the user.
                 event.app.exit(result="\x00ADP_IMMEDIATE\x00" + buf.text)
                 return
+            # Empty buffer: only emit a stop signal when a task is actually running.
+            # Without this guard the signal fires at idle too, causing the event
+            # loop to dispatch a null-byte instruction and terminate the session.
+            if self._task_active:
+                event.app.exit(result="\x00ADP_IMMEDIATE\x00")
+            # If no task is running, Escape on an empty buffer does nothing
+            # (same behaviour as before — clears any completion menu already
+            # handled above, otherwise a no-op so the composer stays open).
+
 
         @self.kb.add("enter")
         def _(event) -> None:
@@ -509,7 +521,12 @@ class TerminalUI:
             key_bindings=self.kb,
             bottom_toolbar=self._composer_toolbar,
             enable_history_search=True,
-            mouse_support=True,
+            # mouse_support disabled: prompt_toolkit's mouse capture intercepts the
+            # scroll wheel and right-click, blocking native terminal scroll, text
+            # selection, and clipboard copy.  Disable it so users can scroll output
+            # and copy text normally.  The live-change footer toggle is rendered
+            # outside PT's event loop so it is unaffected.
+            mouse_support=False,
         )
         try:
             self.session.app.ttimeoutlen = 0.03
@@ -720,7 +737,7 @@ class TerminalUI:
         }.get(str(getattr(self, "_live_label", "") or "").lower(), str(getattr(self, "_live_label", "working") or "working").lower())
         if getattr(self, "_live_compact", False):
             file_part = f" · {self._live_detail}" if getattr(self, "_live_detail", "") else ""
-            working = f" {frame} Advertpreneur is working{file_part} · {elapsed:.1f}s"
+            working = f" {frame} coding{file_part} · {elapsed:.1f}s"
             sys.stdout.write("\r\x1b[2K" + self._fit(working, width) + "\n")
             sys.stdout.write("\r\x1b[2K\x1b[38;2;215;217;222m" + self._fit(composer, width) + "\x1b[0m\n")
             sys.stdout.write("\r\x1b[2K\x1b[38;2;138;143;152m" + self._fit(f"  {self._joke}", width) + "\x1b[0m\n")

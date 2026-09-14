@@ -163,8 +163,9 @@ class _CodexAppServerClient:
         with self._lock:
             if self.proc and self.proc.poll() is None:
                 return
+            cmd = ExternalProviderHarness._normalize_command_argv([self.command, "app-server", "--listen", "stdio://"])
             self.proc = subprocess.Popen(
-                [self.command, "app-server", "--listen", "stdio://"],
+                cmd,
                 cwd=str(self.cwd), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
                 creationflags=ExternalProviderHarness._creationflags(),
@@ -343,14 +344,11 @@ class _AgyStreamDriver:
             argv += ["--mode=accept-edits"]
         if self.model:
             argv += ["--model", self.model]
-        # AGY model slugs such as gemini-3.7-flash-medium already encode the
-        # reasoning tier. Google treats --model <tiered-slug> + --effort as
-        # conflicting selectors, so only pass --effort for non-tiered models.
         if self._uses_effort_flag(self.model):
             argv += ["--effort", self.effort]
         if self.resume_id:
             argv += ["--conversation", self.resume_id]
-        return argv
+        return ExternalProviderHarness._normalize_command_argv(argv)
 
     def start(self) -> None:
         if self.proc and self.proc.poll() is None:
@@ -417,12 +415,30 @@ class _AgyStreamDriver:
             looped = False
             final: Dict[str, Any] = {}
             turn_usage: Dict[str, int] = {}
+            _heartbeat_at = started
+            _HEARTBEAT_INTERVAL = 8.0  # emit a "still thinking" event every N seconds
             while time.monotonic() < deadline:
                 try:
                     line = self.out_q.get(timeout=min(0.4, max(0.05, deadline - time.monotonic())))
                 except queue.Empty:
                     if proc.poll() is not None:
                         break
+                    # Emit a lightweight heartbeat while AGY is in a silent reasoning
+                    # phase (no stream events).  This keeps the TUI spinner alive and
+                    # shows elapsed time so the session doesn't appear frozen.
+                    now = time.monotonic()
+                    if on_event and now - _heartbeat_at >= _HEARTBEAT_INTERVAL:
+                        elapsed_s = int(now - started)
+                        detail = (
+                            f"provider reasoning · {elapsed_s}s elapsed"
+                            if not tool_calls
+                            else f"provider reasoning · {elapsed_s}s · {tool_calls} tool call(s) done"
+                        )
+                        try:
+                            on_event(ProviderActivity("thinking", "Thinking", detail))
+                        except Exception:
+                            pass
+                        _heartbeat_at = now
                     continue
                 if line is None:
                     break
@@ -635,9 +651,30 @@ class ExternalProviderHarness:
         return int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0
 
     @staticmethod
+    def _normalize_command_argv(argv: List[str]) -> List[str]:
+        if not argv:
+            return list(argv)
+        _argv = list(argv)
+        cmd = str(_argv[0])
+        if os.name == "nt":
+            if cmd.lower().endswith(".py"):
+                return [sys.executable] + _argv
+            try:
+                p = Path(cmd)
+                if p.is_file():
+                    with open(p, "rb") as f:
+                        header = f.read(128)
+                    if header.startswith(b"#!") and b"python" in header.lower():
+                        return [sys.executable] + _argv
+            except Exception:
+                pass
+        return _argv
+
+    @staticmethod
     def _run_capture(argv: List[str], cwd: Path, timeout: int = 30) -> subprocess.CompletedProcess[str]:
+        _argv = ExternalProviderHarness._normalize_command_argv(argv)
         return subprocess.run(
-            argv,
+            _argv,
             cwd=str(cwd),
             capture_output=True,
             text=True,
@@ -1588,9 +1625,9 @@ class ExternalProviderHarness:
         on_event: Callable[[ProviderActivity], None] | None,
         mapper: Callable[[Dict[str, Any]], ProviderActivity | None],
     ) -> tuple[int, str, str, int, int, bool]:
-        """Run a provider JSON stream with bounded tool-loop protection."""
+        _argv = ExternalProviderHarness._normalize_command_argv(argv)
         proc = subprocess.Popen(
-            argv, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            _argv, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", bufsize=1, creationflags=self._creationflags(),
         )
         out_q: queue.Queue[str | None] = queue.Queue()

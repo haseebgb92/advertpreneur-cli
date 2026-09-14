@@ -144,6 +144,7 @@ def test_codex_sdk_catalog_uses_public_models_api(tmp_path: Path, monkeypatch):
     import types
 
     h = ExternalProviderHarness(tmp_path / "app", tmp_path)
+    monkeypatch.setattr(h, "_which", lambda provider: "")
     monkeypatch.setattr(h, "_codex_sdk_available", lambda: True)
     monkeypatch.setattr(h, "ensure_runtime", lambda provider: "sdk")
 

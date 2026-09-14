@@ -294,9 +294,10 @@ def test_codex_native_app_server_reuses_loaded_thread_without_exec_resume(tmp_pa
     assert methods.count("thread/resume") == 1
     assert methods.count("turn/start") == 3
     first_thread_line = next(line for line in lines if line.startswith("thread/start "))
-    resume_line = next(line for line in lines if line.startswith("thread/resume "))
-    assert '"mcp_servers.hostinger-dns": {"args": [], "command": "node", "enabled": false}' in first_thread_line
+    assert '"mcp_servers.hostinger-dns.enabled": false' in first_thread_line
+    assert '"mcp_servers.hostinger-dns.command": "node"' in first_thread_line
     assert '"features.plugins": false' in first_thread_line
+    resume_line = next(line for line in lines if line.startswith("thread/resume "))
     assert 'mcp_servers.hostinger-dns' not in resume_line
     assert '"excludeTurns": true' in resume_line
     h.close()

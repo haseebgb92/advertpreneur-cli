@@ -535,7 +535,10 @@ class ToolRegistry:
             if action in {"navigate", "open"}:
                 if not url:
                     raise ToolError("browser navigate requires url")
-                result = self.browser_controller.navigate(url, tab=tab)
+                try:
+                    result = self.browser_controller.navigate(url, tab=tab) if tab is not None else self.browser_controller.navigate(url)
+                except TypeError:
+                    result = self.browser_controller.navigate(url)
                 return result + self._auto_site_profile(url)
             if action == "site_detect":
                 adapter = self.site_adapters.detect(url or self.browser_controller.current_url)

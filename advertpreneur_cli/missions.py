@@ -194,6 +194,32 @@ class MissionStore:
         except FileNotFoundError as exc:
             raise KeyError(f"Unknown mission: {mission_id}") from exc
 
+    def recover_interrupted(self) -> list[str]:
+        """Mark work abandoned by a prior daemon/CLI process as resumable.
+
+        Only a mission whose reducer recorded ``active`` can have been executing
+        at a crash boundary.  Its active step is returned to ``pending`` so a
+        future explicit resume starts from the last verified evidence instead of
+        assuming an unknown mutation completed.
+        """
+        recovered: list[str] = []
+        for path in sorted(self.directory.glob("*.json")):
+            if path.name == "attention.json":
+                continue
+            try:
+                mission = Mission.from_dict(json.loads(path.read_text(encoding="utf-8")))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                continue
+            if mission.status != "active":
+                continue
+            active = [step for step in mission.steps if step.state == "active"]
+            for step in active:
+                step.state = "pending"
+            mission.status = "interrupted"
+            self._save(mission, "recovered_interrupted", {"step_ids": [step.id for step in active]})
+            recovered.append(mission.id)
+        return recovered
+
     def transition_step(self, mission_id: str, step_id: str, state: str) -> Mission:
         if state not in STEP_STATES:
             raise ValueError(f"Unknown mission step state: {state}")
