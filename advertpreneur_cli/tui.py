@@ -486,19 +486,14 @@ class TerminalUI:
                     buf.text = ""
                     buf.cursor_position = 0
                 return
-            if buf.text.strip():
-                # The main loop treats this prefix as a priority follow-up while
-                # a task is active. It is intentionally never shown to the user.
-                event.app.exit(result="\x00ADP_IMMEDIATE\x00" + buf.text)
-                return
-            # Empty buffer: only emit a stop signal when a task is actually running.
-            # Without this guard the signal fires at idle too, causing the event
-            # loop to dispatch a null-byte instruction and terminate the session.
             if self._task_active:
-                event.app.exit(result="\x00ADP_IMMEDIATE\x00")
-            # If no task is running, Escape on an empty buffer does nothing
-            # (same behaviour as before — clears any completion menu already
-            # handled above, otherwise a no-op so the composer stays open).
+                # Escape stops the active running task immediately without
+                # sending any message as high priority.
+                buf.text = ""
+                buf.cursor_position = 0
+                event.app.exit(result="\x00ADP_STOP\x00")
+                return
+            # If no task is running, Escape on an empty buffer does nothing.
 
 
         @self.kb.add("enter")

@@ -421,7 +421,7 @@ class _AgyStreamDriver:
                 try:
                     line = self.out_q.get(timeout=min(0.4, max(0.05, deadline - time.monotonic())))
                 except queue.Empty:
-                    if proc.poll() is not None:
+                    if proc.poll() is not None or self.proc is None:
                         break
                     # Emit a lightweight heartbeat while AGY is in a silent reasoning
                     # phase (no stream events).  This keeps the TUI spinner alive and
@@ -1649,48 +1649,57 @@ class ExternalProviderHarness:
         raw_lines: List[str] = []
         tool_calls = 0; activity_events = 0; stopped_for_loop = False
         signatures: Dict[str, int] = {}
-        while time.monotonic() < deadline:
-            try: line = out_q.get(timeout=min(0.4, max(0.05, deadline - time.monotonic())))
-            except queue.Empty:
-                if proc.poll() is not None: break
-                continue
-            if line is None: break
-            raw_lines.append(line)
-            if len(raw_lines) > 4000: raw_lines = raw_lines[-4000:]
-            try: row = json.loads(line)
-            except Exception: continue
-            if not isinstance(row, dict): continue
-            activity = mapper(row)
-            if not activity: continue
-            activity_events += 1
-            if activity.kind == "tool" and activity.signature:
-                tool_calls += 1
-                signatures[activity.signature] = signatures.get(activity.signature, 0) + 1
-                # High enough not to break normal WP work; low enough to stop an
-                # obvious stuck loop before it consumes a large subscription window.
-                if signatures[activity.signature] >= 12 or tool_calls >= 120:
-                    stopped_for_loop = True
-                    activity = ProviderActivity("guard", "Tool loop stopped", f"{tool_calls} tool calls · repeated operation detected")
-                    if on_event:
-                        try: on_event(activity)
+        def _stop_stream() -> None:
+            try: proc.terminate()
+            except Exception: pass
+            try: proc.kill()
+            except Exception: pass
+        self._set_active_interrupt(_stop_stream)
+        try:
+            while time.monotonic() < deadline:
+                try: line = out_q.get(timeout=min(0.4, max(0.05, deadline - time.monotonic())))
+                except queue.Empty:
+                    if proc.poll() is not None: break
+                    continue
+                if line is None: break
+                raw_lines.append(line)
+                if len(raw_lines) > 4000: raw_lines = raw_lines[-4000:]
+                try: row = json.loads(line)
+                except Exception: continue
+                if not isinstance(row, dict): continue
+                activity = mapper(row)
+                if not activity: continue
+                activity_events += 1
+                if activity.kind == "tool" and activity.signature:
+                    tool_calls += 1
+                    signatures[activity.signature] = signatures.get(activity.signature, 0) + 1
+                    # High enough not to break normal WP work; low enough to stop an
+                    # obvious stuck loop before it consumes a large subscription window.
+                    if signatures[activity.signature] >= 12 or tool_calls >= 120:
+                        stopped_for_loop = True
+                        activity = ProviderActivity("guard", "Tool loop stopped", f"{tool_calls} tool calls · repeated operation detected")
+                        if on_event:
+                            try: on_event(activity)
+                            except Exception: pass
+                        try: proc.terminate()
                         except Exception: pass
+                        break
+                if on_event:
+                    try: on_event(activity)
+                    except Exception: pass
+            if proc.poll() is None:
+                if time.monotonic() >= deadline:
                     try: proc.terminate()
                     except Exception: pass
-                    break
-            if on_event:
-                try: on_event(activity)
-                except Exception: pass
-        if proc.poll() is None:
-            if time.monotonic() >= deadline:
-                try: proc.terminate()
-                except Exception: pass
-            try: proc.wait(timeout=3)
-            except Exception:
-                try: proc.kill()
-                except Exception: pass
-        try: proc.wait(timeout=1)
-        except Exception: pass
-        return int(proc.returncode or 0), "".join(raw_lines), "".join(err_lines), tool_calls, activity_events, stopped_for_loop
+                try: proc.wait(timeout=3)
+                except Exception:
+                    try: proc.kill()
+                    except Exception: pass
+            try: proc.wait(timeout=1)
+            except Exception: pass
+            return int(proc.returncode or 0), "".join(raw_lines), "".join(err_lines), tool_calls, activity_events, stopped_for_loop
+        finally:
+            self._set_active_interrupt(None)
 
     @staticmethod
     def _codex_session_config(

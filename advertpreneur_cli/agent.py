@@ -410,7 +410,7 @@ class CodingAgent:
         )
         return any(x in low for x in markers)
 
-    def run_task(self, task: str, profile: ModelProfile, original_task: str | None = None, image_paths: List[Path] | None = None) -> TaskResult:
+    def run_task(self, task: str, profile: ModelProfile, original_task: str | None = None, image_paths: List[Path] | None = None, should_yield: Callable[[], bool] | None = None) -> TaskResult:
         self.budget.reset_task()
         self.active_task = task
         self._assert_cloud_access(profile)
@@ -445,6 +445,10 @@ class CodingAgent:
         browser_visual_attached = False
 
         for turn in range(1, self.settings.max_agent_turns + 1):
+            if should_yield and should_yield():
+                self._event("task_stop", reason="interrupted by user (Escape)")
+                self.active_task = ""
+                return TaskResult("Task stopped by user · Escape pressed", profile.model, profile.provider, turn - 1, tool_calls_total)
             ok, reason = self.budget.can_request()
             if not ok:
                 self._event("task_stop", reason=reason)

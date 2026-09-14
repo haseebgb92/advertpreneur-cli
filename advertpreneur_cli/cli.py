@@ -57,7 +57,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.22.0"
+VERSION = "0.22.1"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -3641,7 +3641,7 @@ class AdvertpreneurCLI:
                 if not run.ok:
                     result_status = "failed"
             else:
-                result = self.agent.run_task(task_text, profile, original_task=raw, image_paths=image_paths)
+                result = self.agent.run_task(task_text, profile, original_task=raw, image_paths=image_paths, should_yield=self._yield_requested.is_set)
                 task_provider_turns = int(result.turns or 0)
                 task_tool_calls = int(getattr(result, "tool_calls", 0) or 0)
                 if image_paths:
@@ -4286,36 +4286,21 @@ class AdvertpreneurCLI:
                     # The worker has ended.  Return to the top of the loop so a
                     # priority Escape message can be dispatched immediately.
                     continue
-                immediate = raw.startswith("\x00ADP_IMMEDIATE\x00")
-                raw = raw.removeprefix("\x00ADP_IMMEDIATE\x00").strip()
-                if immediate and not raw:
-                    # Escape pressed on an empty composer while a task is running.
-                    # Request a yield/stop without queuing any follow-up message.
+                if raw in {"\x00ADP_STOP\x00", "\x00ADP_IMMEDIATE\x00"}:
+                    # Escape pressed while a task is running: stop the active task immediately.
                     self._yield_requested.set()
                     interrupted = False
                     try:
                         interrupted = bool(self.provider_harness.interrupt_active())
                     except Exception:
                         pass
-                    self.ui.muted(
-                        "Stopping current task · Escape pressed"
-                        if interrupted else "Yield requested · stopping at the next safe boundary"
-                    )
-                elif raw:
+                    self.ui.muted("Stopping current task · Escape pressed")
+                    continue
+                immediate = raw.startswith("\x00ADP_IMMEDIATE\x00")
+                raw = raw.removeprefix("\x00ADP_IMMEDIATE\x00").strip()
+                if raw:
                     self._queued_messages.put((immediate, raw))
-                    if immediate:
-                        self._yield_requested.set()
-                        interrupted = False
-                        try:
-                            interrupted = bool(self.provider_harness.interrupt_active())
-                        except Exception:
-                            pass
-                        self.ui.muted(
-                            "Immediate message received · stopping current provider turn"
-                            if interrupted else "Immediate message received · yielding at the next safe boundary"
-                        )
-                    else:
-                        self.ui.muted("Queued next message")
+                    self.ui.muted("Queued next message")
                 continue
             else:
                 bridge_hops = 0
