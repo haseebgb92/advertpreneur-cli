@@ -4,6 +4,8 @@ Advertpreneur CLI (`advertpreneur` or `adp`) is a Windows-first coding and site-
 
 ## v0.21.5 — reliable multi-tab Amazon / Helium 10 research
 
+- An explicit Softzilla or Amazon URL now opens in its named browser tab before provider planning. Escape interrupts the active external provider turn, prevents its next action, and wakes the composer to dispatch the queued replacement message without another keypress.
+
 - Browser Bridge now keeps named tab slots: `access` for the member portal, `helium` for the launched Helium 10 app, and `amazon` for the research work. Capturing Launch Web App is restricted to the same browser window as its launcher.
 - Amazon research is pinned to the `amazon` slot. After each CSV download is recorded and renamed, ADP refreshes that same tab before the next keyword while leaving Helium 10 open.
 - The workflow tells every supported provider to verify New York ZIP `10001`, use the observed Xray **Load more** control, and retry the observed modal refresh once after 30 seconds if data has not appeared.

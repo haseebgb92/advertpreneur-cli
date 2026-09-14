@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
+from urllib.parse import urlparse
 
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.shortcuts import clear
@@ -59,6 +60,7 @@ from .tui import COMMANDS, MenuItem, TerminalUI
 VERSION = "0.21.5"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
+_TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
 
 
 @dataclass
@@ -198,6 +200,10 @@ class AdvertpreneurCLI:
         self.current_session = self.session_store.create(self.project, self.active.provider, self.active.model)
         self.last_result = ""
         self._queued_messages: queue.Queue[tuple[bool, str]] = queue.Queue()
+        # Set by Escape while a task is active.  Providers and the shared action
+        # gateway consume it at safe boundaries so a replacement instruction never
+        # waits behind another browser/file mutation.
+        self._yield_requested = threading.Event()
         self._current_mission_id = ""
         self._approval_requests: queue.Queue[_PendingApproval] = queue.Queue()
         self._task_thread: threading.Thread | None = None
@@ -257,6 +263,20 @@ class AdvertpreneurCLI:
             "evidence": f"{observed}/{required}",
         })
 
+    def _bootstrap_explicit_browser_tabs(self, instruction: str) -> bool:
+        """Open an explicitly requested research site before a provider can stall on planning."""
+        urls = re.findall(r"https?://[^\s<>'\"]+", str(instruction or ""), flags=re.I)
+        for raw_url in urls:
+            url = raw_url.rstrip(".,;:)")
+            host = (urlparse(url).hostname or "").lower()
+            if host.endswith("softzilla.net"):
+                self.tools.tool_browser("navigate", url=url, tab="access")
+                return True
+            if host.endswith("amazon.com"):
+                self.tools.tool_browser("navigate", url=url, tab="amazon")
+                return True
+        return False
+
     def _request_approval(self, kind: str, detail: str) -> bool:
         """Ask the owning CLI thread to render an approval prompt safely.
 
@@ -287,6 +307,20 @@ class AdvertpreneurCLI:
         finally:
             request.done.set()
         return True
+
+    def _on_task_worker_exit(self) -> None:
+        """Wake the main composer after a task ends so queued work is dispatched.
+
+        This is especially important after Escape: the replacement instruction is
+        already queued, but Prompt Toolkit otherwise remains blocked waiting for
+        another keypress after the provider worker has yielded.
+        """
+        with self._task_lock:
+            self._task_thread = None
+        try:
+            self.ui.interrupt_prompt(_TASK_DONE_WAKE)
+        except Exception:
+            pass
 
     def _refresh_git_state(self) -> None:
         self.git_branch = self._git_branch(self.project)
@@ -3086,19 +3120,37 @@ class AdvertpreneurCLI:
         turn_runs: list[ProviderRun] = []
 
         def run_provider_turn(turn_prompt: str, conversation_id: str) -> tuple[str, str]:
-            turn = self.provider_harness.run(
-                provider, turn_prompt, model=model, effort=effort, cwd=self.project, timeout=900,
-                write=not self.plan_mode, on_event=activity, conversation_id=conversation_id,
-                session_key=self.current_session.id, disabled_mcp_servers=disabled_mcps,
-                mcp_server_states=mcp_states, mcp_server_overrides=mcp_overrides, plugins_enabled=plugins_enabled,
-                developer_instructions=coding_instructions if provider == "codex" else "",
-            )
+            try:
+                turn = self.provider_harness.run(
+                    provider, turn_prompt, model=model, effort=effort, cwd=self.project, timeout=900,
+                    write=not self.plan_mode, on_event=activity, conversation_id=conversation_id,
+                    session_key=self.current_session.id, disabled_mcp_servers=disabled_mcps,
+                    mcp_server_states=mcp_states, mcp_server_overrides=mcp_overrides, plugins_enabled=plugins_enabled,
+                    developer_instructions=coding_instructions if provider == "codex" else "",
+                )
+            except ProviderHarnessError:
+                if not self._yield_requested.is_set():
+                    raise
+                turn = ProviderRun(
+                    provider, model or "provider-default",
+                    "Advertpreneur yielded the active provider turn for your immediate message.", 2,
+                    conversation_id=conversation_id, status="YIELDED", reasoning_effort=effort,
+                )
             turn_runs.append(turn)
             return turn.text, turn.conversation_id
 
-        loop = gateway.drive(prompt, run_provider_turn, prior_thread)
+        loop = gateway.drive(
+            prompt,
+            run_provider_turn,
+            prior_thread,
+            should_yield=getattr(self, "_yield_requested", threading.Event()).is_set,
+        )
         run = turn_runs[-1]
-        if loop.blocked:
+        if loop.yielded:
+            run.text = loop.text
+            run.status = "YIELDED"
+            run.returncode = 2
+        elif loop.blocked:
             run.text = loop.text
             run.status = "ACTION_BLOCKED"
             run.returncode = 2
@@ -3419,6 +3471,14 @@ class AdvertpreneurCLI:
         self.ui.begin_working(profile.model, "Preparing task", 1)
         self._task_result_card_emitted = False
         self.notifier.task_started(profile.model, "Preparing task")
+        # A user-supplied starting URL is an instruction, not a suggestion for the
+        # provider to deliberate about. Open it before indexing/planning so saved
+        # browser sessions can establish naturally while ADP prepares the mission.
+        try:
+            if self._bootstrap_explicit_browser_tabs(raw):
+                self.ui.work_event("Browser mission", "opened explicit starting tab")
+        except Exception as exc:
+            self.ui.muted(f"Browser mission start unavailable · {exc}")
         self._ensure_project_index()
         self._maybe_auto_compact()
         self._current_task_raw = raw
@@ -3427,7 +3487,6 @@ class AdvertpreneurCLI:
         except Exception:
             self._current_task_plan = None
         self._resource_preflight_task(profile)
-
         specialist = self.workforce.select(raw)
         task_text = self.workforce.context(raw) + "\n\n" + raw
         # If the user navigated with /browser first, carry that local browser state
@@ -4199,11 +4258,27 @@ class AdvertpreneurCLI:
                 if raw == _APPROVAL_WAKE:
                     self._serve_pending_approval()
                     continue
+                if raw == _TASK_DONE_WAKE:
+                    # The worker has ended.  Return to the top of the loop so a
+                    # priority Escape message can be dispatched immediately.
+                    continue
                 immediate = raw.startswith("\x00ADP_IMMEDIATE\x00")
                 raw = raw.removeprefix("\x00ADP_IMMEDIATE\x00").strip()
                 if raw:
                     self._queued_messages.put((immediate, raw))
-                    self.ui.muted("Queued next message" + (" · priority" if immediate else ""))
+                    if immediate:
+                        self._yield_requested.set()
+                        interrupted = False
+                        try:
+                            interrupted = bool(self.provider_harness.interrupt_active())
+                        except Exception:
+                            pass
+                        self.ui.muted(
+                            "Immediate message received · stopping current provider turn"
+                            if interrupted else "Immediate message received · yielding at the next safe boundary"
+                        )
+                    else:
+                        self.ui.muted("Queued next message")
                 continue
             else:
                 bridge_hops = 0
@@ -4242,9 +4317,9 @@ class AdvertpreneurCLI:
                         try:
                             self.run_task(instruction)
                         finally:
-                            with self._task_lock:
-                                self._task_thread = None
+                            self._on_task_worker_exit()
                     with self._task_lock:
+                        self._yield_requested.clear()
                         self._task_thread = threading.Thread(target=worker, args=(raw,), name="advertpreneur-task", daemon=True)
                         self._task_thread.start()
                     # Keep the composer active while the task thread runs. The

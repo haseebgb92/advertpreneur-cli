@@ -565,6 +565,8 @@ class ExternalProviderHarness:
         self._quota_threshold_state: Dict[str, set[int]] = {}
         self._codex_app: _CodexAppServerClient | None = None
         self._agy_streams: Dict[str, "_AgyStreamDriver"] = {}
+        self._active_interrupt_lock = threading.RLock()
+        self._active_interrupt: Callable[[], None] | None = None
         self._codex_loaded_threads: set[str] = set()
         self._codex_thread_configs: Dict[str, str] = {}
         self._prune_run_dirs()
@@ -578,6 +580,24 @@ class ExternalProviderHarness:
             try: self._codex_app.close()
             except Exception: pass
             self._codex_app = None
+
+    def _set_active_interrupt(self, callback: Callable[[], None] | None) -> None:
+        with self._active_interrupt_lock:
+            self._active_interrupt = callback
+
+    def interrupt_active(self) -> bool:
+        """Ask the one in-flight external turn to stop without closing ADP itself."""
+        with self._active_interrupt_lock:
+            callback = self._active_interrupt
+            self._active_interrupt = None
+        if callback is None:
+            return False
+        try:
+            callback()
+        except Exception:
+            # The provider can already have completed between Escape and this call.
+            pass
+        return True
 
     def _prune_run_dirs(self, max_age_days: int = 7) -> None:
         cutoff = time.time() - max_age_days * 86400
@@ -1749,6 +1769,9 @@ class ExternalProviderHarness:
             if not turn_id:
                 raise ProviderHarnessError("Codex app-server turn/start returned no turn id")
             turn_accepted = True
+            self._set_active_interrupt(
+                lambda: client.request("turn/interrupt", {"threadId": thread_id, "turnId": turn_id}, timeout=5)
+            )
             deadline = time.monotonic() + max(30, timeout)
             final_text = ""; status = ""; error = ""
             usage: Dict[str, Any] = {}; tools = 0; events = 0
@@ -1826,6 +1849,7 @@ class ExternalProviderHarness:
                 raise ProviderHarnessError(f"Codex app-server turn failed after start; not retried: {exc}") from exc
             raise
         finally:
+            self._set_active_interrupt(None)
             client.unsubscribe(q)
 
     @staticmethod
@@ -2044,6 +2068,7 @@ class ExternalProviderHarness:
                 driver = _AgyStreamDriver(command, work, model.strip(), effort, write, prior, timeout=max(timeout, 120))
                 self._agy_streams[key] = driver
             try:
+                self._set_active_interrupt(driver.close)
                 return driver.ask(prompt, on_event, self._activity_from_agy_row, timeout)
             except Exception:
                 # Drop a broken driver. The next turn can resume from the last known
@@ -2052,6 +2077,8 @@ class ExternalProviderHarness:
                 except Exception: pass
                 self._agy_streams.pop(key, None)
                 raise
+            finally:
+                self._set_active_interrupt(None)
 
         # Compatibility fallback: resume by explicit conversation ID even when a
         # persistent driver cannot be held (specialist/one-shot invocations).

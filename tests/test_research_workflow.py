@@ -2,6 +2,7 @@ from pathlib import Path
 
 from advertpreneur_cli.browser_control import BrowserController
 from advertpreneur_cli.action_gateway import ExternalActionGateway
+from advertpreneur_cli.cli import AdvertpreneurCLI
 from advertpreneur_cli.tools import ToolRegistry
 
 try:
@@ -241,3 +242,18 @@ def test_safe_mode_does_not_prompt_for_non_destructive_browser_clicks_or_fills(t
 
     assert tools.tool_browser("click", selector="#launch", tab="access") == "clicked"
     assert tools.tool_browser("fill", selector="#search", value="keyword", tab="amazon") == "filled"
+
+
+def test_explicit_helium_access_url_bootstraps_access_tab_before_provider_turn():
+    calls = []
+
+    class Tools:
+        def tool_browser(self, action, **kwargs):
+            calls.append((action, kwargs))
+            return "opened"
+
+    cli = object.__new__(AdvertpreneurCLI)
+    cli.tools = Tools()
+
+    assert cli._bootstrap_explicit_browser_tabs("First go to https://members.softzilla.net/member and launch Helium 10") is True
+    assert calls == [("navigate", {"url": "https://members.softzilla.net/member", "tab": "access"})]

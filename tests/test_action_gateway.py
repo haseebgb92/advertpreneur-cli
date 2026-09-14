@@ -149,6 +149,100 @@ def test_gateway_stops_at_login_without_requesting_another_provider_turn():
     assert len(calls) == 1
 
 
+def test_gateway_yields_before_dispatching_an_action_requested_after_escape():
+    """An immediate composer message must stop at the next safe action boundary."""
+    from advertpreneur_cli.action_gateway import ExternalActionGateway
+
+    tools = FakeTools({"browser": "Browser bridge connected"})
+    yielded = False
+
+    def provider_turn(_prompt, _conversation_id):
+        nonlocal yielded
+        yielded = True
+        return ('```adp_action\n{"tool":"browser","args":{"action":"status"}}\n```', "thread")
+
+    result = ExternalActionGateway(tools).drive(
+        "Inspect the browser",
+        provider_turn,
+        should_yield=lambda: yielded,
+    )
+
+    assert result.yielded is True
+    assert result.blocked is False
+    assert tools.calls == []
+
+
+def test_cli_marks_an_external_turn_yielded_when_escape_arrives(tmp_path):
+    """The immediate composer path must not leave the old provider task active."""
+    from advertpreneur_cli.action_gateway import ExternalActionGateway
+
+    cli = object.__new__(AdvertpreneurCLI)
+    cli.project = tmp_path
+    cli.codex_effort = cli.agy_effort = "low"
+    cli._current_task_plan = None
+    cli.framework_intelligence = SimpleNamespace(context=lambda *_args, **_kwargs: "")
+    cli.project_contract = SimpleNamespace(context=lambda **_kwargs: "")
+    cli.current_session = SimpleNamespace(provider_threads={}, bridge_enabled=False, id="session", input_tokens=0, output_tokens=0, requests=0)
+    cli.subscription_quota_protection = False
+    cli.plan_mode = False
+    cli.tools = FakeTools({"browser": "Browser bridge connected"})
+    cli.budget = SimpleNamespace(record=lambda *_args, **_kwargs: None)
+    cli.notifier = SimpleNamespace(quota_warning=lambda *_args, **_kwargs: None)
+    cli.agent = SimpleNamespace(messages=[], system_prompt=lambda: "test system prompt")
+    cli._micro_coding_task = lambda _text: False
+    cli._agy_effective_effort = lambda _model, effort: effort
+    cli._codex_mcp_states = lambda _text: {}
+    cli._codex_mcp_transport_overrides = lambda _text: {}
+    cli._codex_plugins_needed = lambda _text: False
+    cli._quota_consumption = lambda *_args: {}
+    cli._provider_thread_should_rollover = lambda _run: False
+    cli._save_session = lambda: None
+    cli.ui = SimpleNamespace(muted=lambda *_args: None, confirm=lambda *_args: True, set_working_state=lambda *_args, **_kwargs: None)
+    cli._yield_requested = __import__("threading").Event()
+
+    class Harness:
+        def quota(self, *_args, **_kwargs): return None
+        def quota_text(self, _quota): return "Quota unavailable"
+        def quota_thresholds(self, _quota): return []
+        def run(self, selected, prompt, **kwargs):
+            cli._yield_requested.set()
+            return ProviderRun(selected, "model", '```adp_action\n{"tool":"browser","args":{"action":"status"}}\n```', 0, conversation_id="thread", status="SUCCESS")
+
+    cli.provider_harness = Harness()
+    run = cli._run_external_coding("agy", "inspect browser", "model")
+
+    assert run.status == "YIELDED"
+    assert run.returncode == 2
+    assert cli.tools.calls == []
+
+
+def test_provider_harness_interrupts_the_current_provider_turn():
+    from advertpreneur_cli.provider_harness import ExternalProviderHarness
+
+    harness = object.__new__(ExternalProviderHarness)
+    harness._active_interrupt_lock = __import__("threading").RLock()
+    called = []
+    harness._active_interrupt = lambda: called.append("interrupted")
+
+    assert harness.interrupt_active() is True
+    assert called == ["interrupted"]
+    assert harness.interrupt_active() is False
+
+
+def test_worker_completion_wakes_composer_so_an_escape_message_dispatches_without_another_keypress():
+    """A yielded provider must return the main loop to its queued immediate message."""
+    cli = object.__new__(AdvertpreneurCLI)
+    wakes = []
+    cli._task_lock = __import__("threading").RLock()
+    cli._task_thread = object()
+    cli.ui = SimpleNamespace(interrupt_prompt=lambda result: wakes.append(result) or True)
+
+    cli._on_task_worker_exit()
+
+    assert cli._task_thread is None
+    assert wakes == ["\x00ADP_TASK_DONE\x00"]
+
+
 @pytest.mark.parametrize("provider", ["codex", "agy"])
 def test_cli_external_route_gives_agy_and_codex_the_same_adp_action_loop(provider, tmp_path):
     cli = object.__new__(AdvertpreneurCLI)

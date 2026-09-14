@@ -36,6 +36,7 @@ class GatewayLoopResult:
     blocked: bool = False
     actions: int = 0
     provider_turns: int = 0
+    yielded: bool = False
 
 
 class ExternalActionGateway:
@@ -149,6 +150,7 @@ class ExternalActionGateway:
         initial_prompt: str,
         run_turn: Callable[[str, str], tuple[str, str]],
         conversation_id: str = "",
+        should_yield: Callable[[], bool] | None = None,
     ) -> GatewayLoopResult:
         """Run a bounded provider-turn -> ADP-action -> evidence loop.
 
@@ -163,6 +165,14 @@ class ExternalActionGateway:
             text, returned_id = run_turn(prompt, current_id)
             turns += 1
             current_id = str(returned_id or current_id)
+            if should_yield and should_yield():
+                return GatewayLoopResult(
+                    "Advertpreneur yielded before the next action; the immediate message will run now.",
+                    current_id,
+                    actions=self._actions,
+                    provider_turns=turns,
+                    yielded=True,
+                )
             request = self.parse_action(text)
             if not request.tool and not request.error:
                 return GatewayLoopResult(str(text or ""), current_id, actions=self._actions, provider_turns=turns)
