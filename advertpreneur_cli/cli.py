@@ -64,7 +64,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.28.1"
+VERSION = "0.28.2"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -406,7 +406,16 @@ class AdvertpreneurCLI:
         self.automation_memory = AutomationMemory(self.project / ".advertpreneur")
         self.self_healing = SelfHealingEngine(self.project)
         self.browser_macros = BrowserMacroStore(self.project)
+        if hasattr(self, "dashboard_server") and self.dashboard_server:
+            try:
+                self.dashboard_server.stop()
+            except Exception:
+                pass
         self.dashboard_server = DashboardServer(self.project)
+        try:
+            self.dashboard_server.start(open_browser=False)
+        except Exception:
+            pass
         self.swarm = SwarmCoordinator(self.project, event_sink=lambda k, t, d: self.dashboard_server.state.add_event(k, t, d) if hasattr(self, "dashboard_server") and self.dashboard_server else None)
         self._current_task_plan = None
         self.handbook = ExperienceHandbook(APP_DIR, self.project)
