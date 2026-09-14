@@ -88,6 +88,27 @@ class CodeEntry:
         )
 
 
+@dataclass
+class ProjectField:
+    name: str
+    value: Any
+    confidence: float = 1.0
+    source: str = "manifest"
+    updated_at: str = ""
+    inspected: bool = True
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "ProjectField":
+        return cls(
+            name=str(d.get("name") or ""),
+            value=d.get("value"),
+            confidence=float(d.get("confidence", 1.0)),
+            source=str(d.get("source") or "manifest"),
+            updated_at=str(d.get("updated_at") or _now()),
+            inspected=bool(d.get("inspected", True)),
+        )
+
+
 class ProjectIndex:
     """Local, deterministic code map. It never calls a cloud model.
 
@@ -422,6 +443,32 @@ class ProjectIndex:
         for _score, e in rows:
             lines.append(f"- {e.path}:{e.line_start}-{e.line_end} · {e.kind} {e.symbol}")
         return "\n".join(lines)
+
+    def fields(self) -> Dict[str, ProjectField]:
+        """Infer key workspace fields with provenance and confidence scores."""
+        result: Dict[str, ProjectField] = {}
+        files = set(self.data.get("files", {}).keys())
+
+        if "package.json" in files:
+            result["project_type"] = ProjectField("project_type", "node", 1.0, "package.json")
+            result["manifest"] = ProjectField("manifest", "package.json", 1.0, "filesystem")
+        elif "pyproject.toml" in files or "requirements.txt" in files:
+            result["project_type"] = ProjectField("project_type", "python", 1.0, "pyproject.toml" if "pyproject.toml" in files else "requirements.txt")
+        elif "cargo.toml" in files:
+            result["project_type"] = ProjectField("project_type", "rust", 1.0, "Cargo.toml")
+        elif "go.mod" in files:
+            result["project_type"] = ProjectField("project_type", "go", 1.0, "go.mod")
+        else:
+            result["project_type"] = ProjectField("project_type", "generic", 0.5, "heuristic", inspected=False)
+
+        if "package.json" in files:
+            result["test_command"] = ProjectField("test_command", "npm test", 0.9, "package.json")
+        elif any("pytest" in p or "test_" in p for p in files):
+            result["test_command"] = ProjectField("test_command", "pytest", 0.85, "file_pattern")
+        else:
+            result["test_command"] = ProjectField("test_command", "", 0.3, "heuristic", inspected=False)
+
+        return result
 
     def stats(self) -> Dict[str, Any]:
         return {

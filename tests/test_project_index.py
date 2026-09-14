@@ -32,3 +32,17 @@ def test_project_index_incremental_reuses_unchanged():
         assert first["changed"] == 1
         assert second["changed"] == 0
         assert second["unchanged"] == 1
+
+
+def test_project_index_fields_confidence():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "pyproject.toml").write_text("[project]\nname = 'test'\n", encoding="utf-8")
+        (root / "test_sample.py").write_text("def test_ok(): pass\n", encoding="utf-8")
+        idx = ProjectIndex(root)
+        idx.build()
+        f = idx.fields()
+        assert "project_type" in f
+        assert f["project_type"].value == "python"
+        assert f["project_type"].confidence == 1.0
+        assert f["project_type"].inspected is True
