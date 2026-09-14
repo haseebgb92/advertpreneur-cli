@@ -64,7 +64,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.28.5"
+VERSION = "0.28.6"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -3208,7 +3208,7 @@ class AdvertpreneurCLI:
             self.ui.muted(note)
             # Never stall Browser Bridge/autopilot. In an interactive CLI, let the
             # user make the spend decision rather than silently rerouting models.
-            if not (self.current_session.bridge_enabled and self.current_session.bridge_autopilot):
+            if self.settings.approval_mode != "full" and not (self.current_session.bridge_enabled and self.current_session.bridge_autopilot):
                 if not self._request_approval("quota", f"Continue this small task with cold {provider.upper()} instead of choosing an Ollama model"):
                     return ProviderRun(provider, model or "provider-default", "Canceled before provider call by Smart Spend guard.", 2,
                         status="SMART_SPEND_CANCELED", reasoning_effort=effort, quota_before=self.provider_harness.quota_text(before_q) if before_q else "Quota unavailable", quota_after=self.provider_harness.quota_text(before_q) if before_q else "Quota unavailable")
