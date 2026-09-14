@@ -46,3 +46,18 @@ def test_project_index_fields_confidence():
         assert f["project_type"].value == "python"
         assert f["project_type"].confidence == 1.0
         assert f["project_type"].inspected is True
+
+
+def test_auto_index_does_not_block_tasks_when_workspace_is_home_directory():
+    from advertpreneur_cli.cli import AdvertpreneurCLI
+
+    cli = object.__new__(AdvertpreneurCLI)
+    cli.auto_index = True
+    cli.project = Path.home().resolve()
+    cli.project_index = type("Index", (), {"ready": False, "build": lambda _self, force=False: (_ for _ in ()).throw(AssertionError("home directory must not be auto-indexed"))})()
+    messages = []
+    cli.ui = type("UI", (), {"muted": lambda _self, message: messages.append(message)})()
+
+    cli._ensure_project_index()
+
+    assert messages == ["Local index skipped: home-directory workspace; use /project for a codebase or /index to run it manually"]

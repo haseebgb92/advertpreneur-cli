@@ -64,7 +64,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.28.3"
+VERSION = "0.28.4"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -2350,6 +2350,10 @@ class AdvertpreneurCLI:
     def _ensure_project_index(self) -> None:
         if not self.auto_index:
             return
+        if self.project == Path.home().resolve():
+            self.ui.muted("Local index skipped: home-directory workspace; use /project for a codebase or /index to run it manually")
+            return
+
         first = not self.project_index.ready
         try:
             if first:
