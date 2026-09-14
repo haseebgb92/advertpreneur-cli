@@ -491,6 +491,7 @@ class TerminalUI:
                 # sending any message as high priority.
                 buf.text = ""
                 buf.cursor_position = 0
+                self._task_active = False
                 event.app.exit(result="\x00ADP_STOP\x00")
                 return
             # If no task is running, Escape on an empty buffer does nothing.

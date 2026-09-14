@@ -58,7 +58,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.23.0"
+VERSION = "0.23.1"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -4362,7 +4362,44 @@ class AdvertpreneurCLI:
                         self.provider_harness.interrupt_active()
                     except Exception:
                         pass
+                    if self._task_thread:
+                        self._task_thread.join(timeout=0.3)
+                    with self._task_lock:
+                        self._task_thread = None
+                    try:
+                        self.ui._task_active = False
+                        self.ui.clear_cockpit()
+                    except Exception:
+                        pass
                     continue
+                cmd_check = raw.removeprefix("\x00ADP_IMMEDIATE\x00").strip()
+                if cmd_check.lower() in {"/exit", "/quit", "exit", "quit", "/stop"}:
+                    self._yield_requested.set()
+                    self.ui.end_working()
+                    try:
+                        self.provider_harness.interrupt_active()
+                    except Exception:
+                        pass
+                    if self._task_thread:
+                        self._task_thread.join(timeout=0.3)
+                    with self._task_lock:
+                        self._task_thread = None
+                    try:
+                        self.ui._task_active = False
+                        self.ui.clear_cockpit()
+                    except Exception:
+                        pass
+                    if cmd_check.lower() in {"/stop"}:
+                        self.ui.error("Task stopped")
+                        continue
+                    print()
+                    self._save_session()
+                    self._bridge_unregister_current()
+                    self.notifier.close()
+                    self.provider_harness.close()
+                    try: self.resource_guard.close()
+                    except Exception: pass
+                    return 0
                 immediate = raw.startswith("\x00ADP_IMMEDIATE\x00")
                 raw = raw.removeprefix("\x00ADP_IMMEDIATE\x00").strip()
                 if raw:
