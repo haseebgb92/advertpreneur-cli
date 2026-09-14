@@ -116,40 +116,52 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if not _GLOBAL_STATE:
             self._serve_json({"events": []})
             return
-        with _GLOBAL_STATE._lock:
-            self._serve_json({"events": [asdict(e) for e in reversed(_GLOBAL_STATE.events)]})
+        try:
+            with _GLOBAL_STATE._lock:
+                self._serve_json({"events": [asdict(e) for e in reversed(_GLOBAL_STATE.events)]})
+        except Exception:
+            self._serve_json({"events": []})
 
     def _serve_checkpoints(self) -> None:
         global _GLOBAL_STATE
         if not _GLOBAL_STATE:
             self._serve_json([])
             return
-        mgr = CheckpointManager(_GLOBAL_STATE.project_path)
-        cps = mgr.list(limit=30)
-        self._serve_json([asdict(c) for c in cps])
+        try:
+            mgr = CheckpointManager(_GLOBAL_STATE.project_path)
+            cps = mgr.list(limit=30)
+            self._serve_json([asdict(c) for c in cps])
+        except Exception:
+            self._serve_json([])
 
     def _serve_memory(self) -> None:
         global _GLOBAL_STATE
         if not _GLOBAL_STATE:
             self._serve_json([])
             return
-        mem = AutomationMemory(_GLOBAL_STATE.project_path)
-        items = mem.query(limit=50)
-        self._serve_json([asdict(m) for m in items])
+        try:
+            mem = AutomationMemory(_GLOBAL_STATE.project_path / ".advertpreneur")
+            items = mem.query(limit=50)
+            self._serve_json([asdict(m) for m in items])
+        except Exception:
+            self._serve_json([])
 
     def _serve_macros(self) -> None:
         global _GLOBAL_STATE
         if not _GLOBAL_STATE:
             self._serve_json([])
             return
-        store = BrowserMacroStore(_GLOBAL_STATE.project_path)
-        names = store.list_macros()
-        macros = []
-        for name in names:
-            m = store.load(name)
-            if m:
-                macros.append(asdict(m))
-        self._serve_json(macros)
+        try:
+            store = BrowserMacroStore(_GLOBAL_STATE.project_path)
+            names = store.list_macros()
+            macros = []
+            for name in names:
+                m = store.load(name)
+                if m:
+                    macros.append(asdict(m))
+            self._serve_json(macros)
+        except Exception:
+            self._serve_json([])
 
     def _serve_html(self) -> None:
         html = """<!DOCTYPE html>

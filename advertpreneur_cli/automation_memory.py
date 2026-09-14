@@ -143,7 +143,7 @@ class AutomationMemory:
         self._save(entries)
         return entry
 
-    def query(self, category: str = "", scope: str = "", query_text: str = "") -> list[MemoryEntry]:
+    def query(self, category: str = "", scope: str = "", query_text: str = "", limit: int = 50) -> list[MemoryEntry]:
         entries = self._load()
         result: list[MemoryEntry] = []
         q_low = str(query_text or "").lower()
@@ -155,6 +155,8 @@ class AutomationMemory:
             if q_low and (q_low not in e.key.lower() and q_low not in e.value.lower()):
                 continue
             result.append(e)
+            if limit and len(result) >= limit:
+                break
         return result
 
     def context(self, task_text: str = "", max_chars: int = 1200) -> str:
