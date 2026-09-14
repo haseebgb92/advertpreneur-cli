@@ -1661,6 +1661,7 @@ class ExternalProviderHarness:
         deadline = time.monotonic() + max(1, timeout)
         raw_lines: List[str] = []
         tool_calls = 0; activity_events = 0; stopped_for_loop = False
+        signatures: Dict[str, int] = {}
         def _stop_stream() -> None:
             try: out_q.put_nowait(None)
             except Exception: pass

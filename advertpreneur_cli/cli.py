@@ -64,7 +64,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.28.7"
+VERSION = "0.28.8"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"

@@ -26,6 +26,16 @@ def test_safe_prompt_call_moves_off_running_asyncio_loop():
     assert seen["thread"] != caller
 
 
+def test_browser_controller_constructor_initializes_bridge_and_state_fields(tmp_path: Path):
+    ctl = BrowserController(tmp_path)
+
+    assert ctl._state_lock is not None
+    assert ctl._extension_last_check == 0.0
+    assert ctl._extension_live is False
+    assert ctl.current_url == ""
+    assert ctl.provider == "idle"
+
+
 def test_existing_edge_extension_is_preferred_for_navigation(tmp_path: Path):
     ctl = BrowserController(tmp_path, visible=True)
     ctl._extension_available = lambda wait_seconds=0.0: True

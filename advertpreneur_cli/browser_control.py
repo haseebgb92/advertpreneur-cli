@@ -51,6 +51,26 @@ class BrowserController:
         self.browser_dir.mkdir(parents=True, exist_ok=True)
         self.slots_path = self.browser_dir / "slots.json"
         self.routines = BrowserRoutineStore(self.browser_dir)
+        self.cdp_url = str(os.environ.get("ADP_BROWSER_CDP_URL") or "http://127.0.0.1:9222").strip()
+        self.bridge = BridgeClient(Path.home() / ".advertpreneur-cli")
+        self._extension_last_check = 0.0
+        self._extension_live = False
+        self._calls: queue.Queue[_BrowserCall] = queue.Queue()
+        self._thread: threading.Thread | None = None
+        self._thread_lock = threading.Lock()
+        self._state_lock = threading.Lock()
+        self._running = False
+        self._provider = "idle"
+        self._current_url = ""
+        self._current_title = ""
+
+        # The following are touched only by the worker thread.
+        self._pw = None
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._attached_cdp = False
+        self._owns_context = False
 
     def get_slots(self) -> dict[str, dict[str, Any]]:
         if not self.slots_path.exists():
@@ -74,27 +94,6 @@ class BrowserController:
             os.replace(tmp, self.slots_path)
         except Exception:
             pass
-
-        self.cdp_url = str(os.environ.get("ADP_BROWSER_CDP_URL") or "http://127.0.0.1:9222").strip()
-        self.bridge = BridgeClient(Path.home() / ".advertpreneur-cli")
-        self._extension_last_check = 0.0
-        self._extension_live = False
-        self._calls: queue.Queue[_BrowserCall] = queue.Queue()
-        self._thread: threading.Thread | None = None
-        self._thread_lock = threading.Lock()
-        self._state_lock = threading.Lock()
-        self._running = False
-        self._provider = "idle"
-        self._current_url = ""
-        self._current_title = ""
-
-        # The following are touched only by the worker thread.
-        self._pw = None
-        self._browser = None
-        self._context = None
-        self._page = None
-        self._attached_cdp = False
-        self._owns_context = False
 
     @property
     def running(self) -> bool:
