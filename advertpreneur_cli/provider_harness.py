@@ -540,17 +540,29 @@ class _AgyStreamDriver:
 
     def close(self) -> None:
         proc, self.proc = self.proc, None
+        try:
+            self.out_q.put_nowait(None)
+        except Exception:
+            pass
         if not proc:
             return
         try:
             if proc.stdin: proc.stdin.close()
         except Exception:
             pass
+        if os.name == "nt":
+            try:
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, timeout=2)
+            except Exception:
+                pass
         try:
-            proc.terminate(); proc.wait(timeout=2)
+            proc.terminate()
         except Exception:
-            try: proc.kill()
-            except Exception: pass
+            pass
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 
 class ExternalProviderHarness:
@@ -1648,8 +1660,14 @@ class ExternalProviderHarness:
         deadline = time.monotonic() + max(1, timeout)
         raw_lines: List[str] = []
         tool_calls = 0; activity_events = 0; stopped_for_loop = False
-        signatures: Dict[str, int] = {}
         def _stop_stream() -> None:
+            try: out_q.put_nowait(None)
+            except Exception: pass
+            if os.name == "nt":
+                try:
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, timeout=2)
+                except Exception:
+                    pass
             try: proc.terminate()
             except Exception: pass
             try: proc.kill()

@@ -57,7 +57,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.22.1"
+VERSION = "0.22.2"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -3138,6 +3138,14 @@ class AdvertpreneurCLI:
         turn_runs: list[ProviderRun] = []
 
         def run_provider_turn(turn_prompt: str, conversation_id: str) -> tuple[str, str]:
+            if getattr(self, "_yield_requested", threading.Event()).is_set():
+                turn = ProviderRun(
+                    provider, model or "provider-default",
+                    "Task stopped · Escape pressed", 2,
+                    conversation_id=conversation_id, status="YIELDED", reasoning_effort=effort,
+                )
+                turn_runs.append(turn)
+                return turn.text, turn.conversation_id
             try:
                 turn = self.provider_harness.run(
                     provider, turn_prompt, model=model, effort=effort, cwd=self.project, timeout=900,
@@ -3151,7 +3159,7 @@ class AdvertpreneurCLI:
                     raise
                 turn = ProviderRun(
                     provider, model or "provider-default",
-                    "Advertpreneur yielded the active provider turn for your immediate message.", 2,
+                    "Task stopped · Escape pressed", 2,
                     conversation_id=conversation_id, status="YIELDED", reasoning_effort=effort,
                 )
             turn_runs.append(turn)
@@ -3597,8 +3605,14 @@ class AdvertpreneurCLI:
                 task_cache_read = int(run.cache_read_tokens or 0)
                 task_thinking = int(run.thinking_tokens or 0)
                 result_text = normalize_user_output(run.text or (run.stderr if not run.ok else "(provider returned no text)"))
-                self.last_result = result_text
-                self.ui.result(result_text)
+                if self._yield_requested.is_set():
+                    self.ui.end_working()
+                    self.ui.error("Task stopped · Escape pressed")
+                    result_status = "interrupted"
+                    completed_ok = False
+                else:
+                    self.last_result = result_text
+                    self.ui.result(result_text)
                 quota_delta = ""
                 if run.quota_consumed:
                     quota_delta = " · quota used " + ", ".join(("wk" if k == "weekly" else k) + f" {v:g}%" for k, v in run.quota_consumed.items())
@@ -4289,12 +4303,12 @@ class AdvertpreneurCLI:
                 if raw in {"\x00ADP_STOP\x00", "\x00ADP_IMMEDIATE\x00"}:
                     # Escape pressed while a task is running: stop the active task immediately.
                     self._yield_requested.set()
-                    interrupted = False
+                    self.ui.end_working()
+                    self.ui.error("Task stopped · Escape pressed")
                     try:
-                        interrupted = bool(self.provider_harness.interrupt_active())
+                        self.provider_harness.interrupt_active()
                     except Exception:
                         pass
-                    self.ui.muted("Stopping current task · Escape pressed")
                     continue
                 immediate = raw.startswith("\x00ADP_IMMEDIATE\x00")
                 raw = raw.removeprefix("\x00ADP_IMMEDIATE\x00").strip()
