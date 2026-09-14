@@ -118,6 +118,7 @@ COMMANDS: List[MenuItem] = [
     MenuItem("/browser", "/browser", "Local browser navigation, screenshots and design maps"),
     MenuItem("/web", "/web", "Search the public web locally without an Ollama call"),
     MenuItem("/hooks", "/hooks", "Configure local lifecycle hooks"),
+    MenuItem("/daemon", "/daemon", "Manage background loopback mission daemon server"),
     MenuItem("/insights", "/insights", "Local daily/weekly harness review · zero model tokens"),
     MenuItem("/settings", "/settings", "Configure models, context, agents, permissions and interface"),
     MenuItem("/bridge", "/bridge", "Link this CLI session to one ChatGPT conversation"),

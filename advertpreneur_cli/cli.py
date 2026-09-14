@@ -53,12 +53,14 @@ from .diff_intelligence import DiffIntelligence
 from .packaging import ProjectPackager
 from .workforce import Workforce
 from .missions import MissionStore, mission_steps_from_task_plan
+from .mission_daemon import MissionDaemon
+from .operation_router import LocalOperationRouter
 from .automation_memory import AutomationMemory
 from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply_latest_update, release_is_newer
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.23.1"
+VERSION = "0.23.2"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -394,6 +396,7 @@ class AdvertpreneurCLI:
         self.packager = ProjectPackager(self.project, self.project_contract)
         self.workforce = Workforce(self.project)
         self.missions = MissionStore(self.project)
+        self.operation_router = LocalOperationRouter(self.project)
         self.automation_memory = AutomationMemory(self.project / ".advertpreneur")
         self._current_task_plan = None
         self.handbook = ExperienceHandbook(APP_DIR, self.project)
@@ -4136,6 +4139,44 @@ class AdvertpreneurCLI:
         finally:
             self.ui.end_working()
 
+    def daemon_command(self, arg: str = "") -> None:
+        action = (arg or "").strip().lower()
+        daemon_desc = self.project / ".advertpreneur" / "mission-daemon.json"
+        if action in {"start", "run"}:
+            if not hasattr(self, "_mission_daemon") or self._mission_daemon is None:
+                self._mission_daemon = MissionDaemon(self.project)
+            started = self._mission_daemon.start()
+            if started:
+                self.ui.success(f"Mission Daemon · RUNNING · port {self._mission_daemon.port} · loopback authenticated")
+            else:
+                self.ui.info("Mission Daemon · already running on this project")
+        elif action in {"stop", "kill"}:
+            if hasattr(self, "_mission_daemon") and self._mission_daemon:
+                self._mission_daemon.stop()
+                self._mission_daemon = None
+                self.ui.success("Mission Daemon · STOPPED")
+            elif daemon_desc.exists():
+                try: daemon_desc.unlink()
+                except Exception: pass
+                self.ui.success("Mission Daemon · cleared descriptor")
+            else:
+                self.ui.info("Mission Daemon · not currently active")
+        else:
+            if daemon_desc.exists():
+                try:
+                    data = json.loads(daemon_desc.read_text(encoding="utf-8"))
+                    self.ui.heading("Mission Daemon")
+                    print(f"  Status        ACTIVE (PID {data.get('pid', '?')})")
+                    print(f"  Port          {data.get('port', '?')}")
+                    print(f"  Protocol      v{data.get('protocol_version', 1)}")
+                    print(f"  Token         {data.get('token', '')[:12]}...")
+                except Exception:
+                    self.ui.info("Mission Daemon · descriptor present but unreadable")
+            else:
+                self.ui.heading("Mission Daemon")
+                print("  Status        STOPPED / INACTIVE")
+                print("  Commands      /daemon start · /daemon stop · /daemon status")
+
     # ---------- command router ----------
     def help(self) -> None:
         self.ui.heading("Commands")
@@ -4203,6 +4244,8 @@ class AdvertpreneurCLI:
             self.web_command(arg)
         elif cmd == "/hooks":
             self.hooks_command(arg)
+        elif cmd == "/daemon":
+            self.daemon_command(arg)
         elif cmd == "/insights":
             self.insights_command(arg)
         elif cmd == "/settings":

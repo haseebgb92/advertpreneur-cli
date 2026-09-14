@@ -49,7 +49,31 @@ class BrowserController:
         self.visible = bool(visible)
         self.browser_dir = self.project / ".advertpreneur" / "browser"
         self.browser_dir.mkdir(parents=True, exist_ok=True)
+        self.slots_path = self.browser_dir / "slots.json"
         self.routines = BrowserRoutineStore(self.browser_dir)
+
+    def get_slots(self) -> dict[str, dict[str, Any]]:
+        if not self.slots_path.exists():
+            return {}
+        try:
+            data = json.loads(self.slots_path.read_text(encoding="utf-8"))
+            return dict(data) if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def record_slot(self, slot: str, url: str, title: str = "") -> None:
+        slots = self.get_slots()
+        slots[str(slot)] = {
+            "url": str(url),
+            "title": str(title),
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        try:
+            tmp = self.slots_path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(slots, indent=2, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, self.slots_path)
+        except Exception:
+            pass
 
         self.cdp_url = str(os.environ.get("ADP_BROWSER_CDP_URL") or "http://127.0.0.1:9222").strip()
         self.bridge = BridgeClient(Path.home() / ".advertpreneur-cli")
@@ -377,11 +401,13 @@ class BrowserController:
         if self._extension_available(wait_seconds=2.5):
             row = self._extension_call("navigate", timeout=45, url=url, wait_until=wait_until, timeout_ms=35000, tab=tab)
             self.routines.record("navigate", {"url": url, "wait_until": wait_until, "tab": tab}, row)
+            self.record_slot(tab, url, str(row.get("title") or ""))
             return self._extension_summary(row, "navigate")
         if tab != "work":
             raise BrowserUnavailable("Named browser tabs require the connected Advertpreneur Browser Bridge extension")
         result = str(self._rpc("navigate", url, wait_until, timeout=60))
         self.routines.record("navigate", {"url": url, "wait_until": wait_until}, {"url": self.current_url, "verified": True})
+        self.record_slot(tab, url, self.current_title)
         return result
 
     def wordpress_state(self) -> dict[str, Any]:
