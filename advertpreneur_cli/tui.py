@@ -873,6 +873,14 @@ class TerminalUI:
         label = color_map.get(act, f"\x1b[1;38;2;243;161;38m● {action.capitalize()}\x1b[0m")
         self._print_raw(f"  {label}(\x1b[38;2;201;209;217m{target}\x1b[0m)")
 
+    def stream_delta(self, delta: str) -> None:
+        """Stream model tokens or output characters live to the console."""
+        if not delta:
+            return
+        with self._live_lock:
+            sys.stdout.write(delta)
+            sys.stdout.flush()
+
     def stop_activity(self, final: str | None = None) -> None:
         if final:
             self.print_line(f"  \x1b[38;2;66;184;131m✓\x1b[0m {final}")
