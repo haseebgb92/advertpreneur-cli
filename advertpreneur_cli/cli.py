@@ -64,7 +64,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.26.0"
+VERSION = "0.26.1"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -511,17 +511,17 @@ class AdvertpreneurCLI:
             if mem_context:
                 blocks.append(mem_context)
 
-        # Extension catalogues are lazy. Explicit names/terms opt them into this task.
-        skill_needed = bool(plan.needs_plugins) if plan else any(x in text for x in ("skill", "plugin", "impeccable", "uiux", "ui/ux", "design system", "figma"))
+        # Extension catalogues are lazy. Explicit skill names or plans opt them into this task.
+        skill_needed = bool(plan.needs_plugins) if plan else False
         if hasattr(self, "plugin_manager"):
             try:
                 skills = self.plugin_manager.skills(enabled_only=True)
                 if any(sk.name.lower() in text or sk.id.lower() in text or sk.plugin_name.lower() in text for sk in skills):
                     skill_needed = True
             except Exception:
-                skill_needed = False if not skill_needed else skill_needed
+                pass
         if skill_needed and hasattr(self, "plugin_manager"):
-            catalog = self.plugin_manager.catalog(max_chars=1100)
+            catalog = self.plugin_manager.catalog(max_chars=600)
             if catalog:
                 blocks.append(catalog)
 

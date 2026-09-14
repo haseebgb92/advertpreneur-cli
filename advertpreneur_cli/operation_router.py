@@ -52,12 +52,24 @@ class LocalOperationRouter:
         self._history: List[Dict[str, Any]] = []
 
     def assert_contained(self, target_path: Path | str) -> Path:
-        """Ensure target path resolves strictly inside the project root and outside sensitive directories."""
-        resolved = (self.project / target_path).resolve()
+        """Ensure target path resolves inside the project root or desktop, and outside sensitive directories."""
+        raw_str = str(target_path or "")
+        resolved = Path(target_path).expanduser().resolve() if (raw_str.startswith("~") or Path(target_path).is_absolute()) else (self.project / target_path).resolve()
+        desktop = (Path.home() / "Desktop").resolve()
+
+        is_contained = False
         try:
             resolved.relative_to(self.project)
-        except ValueError as exc:
-            raise OperationSecurityError(f"Path traversal blocked: '{target_path}' is outside project root '{self.project}'") from exc
+            is_contained = True
+        except ValueError:
+            try:
+                resolved.relative_to(desktop)
+                is_contained = True
+            except ValueError:
+                pass
+
+        if not is_contained:
+            raise OperationSecurityError(f"Path traversal blocked: '{target_path}' is outside project root '{self.project}'")
 
         str_path = str(resolved)
         for pat in _SENSITIVE_DIRECTORY_PATTERNS:

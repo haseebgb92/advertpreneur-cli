@@ -472,13 +472,26 @@ class CodingAgent:
                 model=profile.model,
                 context_breakdown=dict(self.last_context_breakdown),
             )
+            def _on_chunk(c: str, t: str) -> None:
+                if t:
+                    self._event("model_thinking", turn=turn, delta=t)
+                if c:
+                    self._event("model_delta", turn=turn, delta=c)
+
             result = self._client(profile.provider).chat(
                 profile.model,
                 send_messages,
                 schemas,
                 think=profile.think,
                 max_output_tokens=output_cap,
+                on_chunk=_on_chunk,
+                should_yield=should_yield,
             )
+            if should_yield and should_yield():
+                self._event("task_stop", reason="interrupted by user (Escape)")
+                self.active_task = ""
+                return TaskResult("Task stopped by user · Escape pressed", profile.model, profile.provider, turn, tool_calls_total)
+
             cost = self._cost(profile, result.input_tokens, result.output_tokens)
             self.budget.record(profile.model, result.input_tokens, result.output_tokens, cost)
             self._event(

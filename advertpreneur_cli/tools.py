@@ -243,12 +243,18 @@ class ToolRegistry:
 
     def _path(self, relative: str | None) -> Path:
         rel = relative or "."
-        candidate = (self.root / rel).resolve()
+        candidate = Path(rel).expanduser().resolve() if (Path(rel).is_absolute() or str(rel).startswith("~")) else (self.root / rel).resolve()
+        desktop = (Path.home() / "Desktop").resolve()
         try:
             candidate.relative_to(self.root)
-        except ValueError as exc:
-            raise ToolError(f"Path escapes project root: {relative}") from exc
-        return candidate
+            return candidate
+        except ValueError:
+            try:
+                candidate.relative_to(desktop)
+                return candidate
+            except ValueError:
+                pass
+            raise ToolError(f"Path escapes project root: {relative}")
 
     def execute(self, name: str, args: Dict[str, Any]) -> str:
         fn = getattr(self, f"tool_{name}", None)
