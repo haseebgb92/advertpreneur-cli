@@ -3620,23 +3620,6 @@ class AdvertpreneurCLI:
             self._save_session()
             return self._bridge_publish_result(raw, local_reply, profile, None, status="completed")
 
-        fast_result = self.operation_router.fast_route(raw) if hasattr(self, "operation_router") else None
-        if fast_result:
-            reply_text, changed_files = fast_result
-            self.budget.reset_task()
-            self._current_task_raw = raw
-            self.last_result = reply_text
-            for f in changed_files:
-                self.ui.action_marker("write", f)
-            self.ui.result(reply_text)
-            self.ui.muted(f"local operation router · 0 model requests · 0 tokens · {len(changed_files)} file(s)")
-            if not self.agent.messages:
-                self.agent.messages = [{"role": "system", "content": self.agent.system_prompt()}]
-            self.agent.messages.append({"role": "user", "content": raw})
-            self.agent.messages.append({"role": "assistant", "content": reply_text})
-            self._save_session()
-            return self._bridge_publish_result(raw, reply_text, profile, None, status="completed")
-
         # Zero-cloud housekeeping happens before any provider request.
         # Keep the same persistent footer visible while local preparation (index,
         # checkpoints, profiles and quota checks) runs. Previously the UI did not

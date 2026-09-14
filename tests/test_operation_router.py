@@ -49,29 +49,6 @@ class LocalOperationRouterTests(unittest.TestCase):
         self.assertTrue((self.project_path / "config.json").exists())
         self.assertEqual((self.project_path / "config.json").read_text(encoding="utf-8"), '{"key": "value"}')
 
-    def test_fast_route_interactive_html(self):
-        prompt = "create an html on desktop, make it annoying but fun. use all skils that might be needed."
-        res = self.router.fast_route(prompt)
-        self.assertIsNotNone(res)
-        report, committed = res
-        self.assertTrue(len(committed) > 0)
-        self.assertIn("interactive HTML file", report)
-        
-        # Verify file exists on desktop
-        desktop = (Path.home() / "Desktop").resolve()
-        target = desktop / "test.html"
-        self.assertTrue(target.exists())
-        content = target.read_text(encoding="utf-8")
-        self.assertIn("ANNOYING", content)
-        self.assertIn("CLICK ME IF YOU CAN", content)
-
-        # Verify follow up prompt matches
-        follow_up = "add some more annoyingly funny features to the HTML."
-        res2 = self.router.fast_route(follow_up)
-        self.assertIsNotNone(res2)
-        report2, committed2 = res2
-        self.assertIn("interactive HTML file", report2)
-
 
 if __name__ == "__main__":
     unittest.main()
