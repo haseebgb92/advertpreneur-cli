@@ -850,6 +850,29 @@ class TerminalUI:
         else:
             self.begin_working(label, state, 1)
 
+    def thought_process(self, text: str) -> None:
+        """Render an Antigravity-style Thought Process marker."""
+        clean = " ".join(str(text or "").split())
+        if not clean:
+            return
+        preview = clean[:320] + ("…" if len(clean) > 320 else "")
+        self._print_raw(f"\n  \x1b[1;38;2;188;140;255m▸ Thought Process\x1b[0m\n    \x1b[38;2;138;143;152m{preview}\x1b[0m\n")
+
+    def action_marker(self, action: str, target: str) -> None:
+        """Render high-visibility Antigravity-style action items (Edit, Write, Read, Bash, Browser)."""
+        act = str(action or "").lower().strip()
+        color_map = {
+            "edit": "\x1b[1;38;2;88;166;255m● Edit\x1b[0m",
+            "write": "\x1b[1;38;2;63;185;80m● Write\x1b[0m",
+            "read": "\x1b[1;38;2;210;153;34m● Read\x1b[0m",
+            "bash": "\x1b[1;38;2;247;120;186m● Bash\x1b[0m",
+            "command": "\x1b[1;38;2;247;120;186m● Bash\x1b[0m",
+            "browser": "\x1b[1;38;2;96;165;250m● Browser\x1b[0m",
+            "mcp": "\x1b[1;38;2;188;140;255m● MCP\x1b[0m",
+        }
+        label = color_map.get(act, f"\x1b[1;38;2;243;161;38m● {action.capitalize()}\x1b[0m")
+        self._print_raw(f"  {label}(\x1b[38;2;201;209;217m{target}\x1b[0m)")
+
     def stop_activity(self, final: str | None = None) -> None:
         if final:
             self.print_line(f"  \x1b[38;2;66;184;131m✓\x1b[0m {final}")

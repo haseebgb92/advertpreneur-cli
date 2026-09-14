@@ -224,6 +224,33 @@ class TuiTests(unittest.TestCase):
         assert answer == [True]
         assert cli.ui.confirm_calls == [("browser", "click #export")]
 
+    def test_thought_process_and_action_markers(self):
+        ui = object.__new__(TerminalUI)
+        ui._live_lock = threading.Lock()
+        ui._live_active = False
+        ui.output = mock.Mock()
+        output = io.StringIO()
+        with redirect_stdout(output):
+            ui.thought_process("Analyzing project structure and files")
+            ui.action_marker("edit", "advertpreneur_cli/cli.py")
+            ui.action_marker("write", "tests/test_new.py")
+            ui.action_marker("read", "pyproject.toml")
+            ui.action_marker("bash", "pytest -v")
+            ui.action_marker("browser", "navigate to https://example.com")
+            ui.action_marker("mcp", "custom:tool")
+
+        rendered = output.getvalue()
+        self.assertIn("Thought Process", rendered)
+        self.assertIn("Analyzing project structure and files", rendered)
+        self.assertIn("● Edit", rendered)
+        self.assertIn("advertpreneur_cli/cli.py", rendered)
+        self.assertIn("● Write", rendered)
+        self.assertIn("● Read", rendered)
+        self.assertIn("● Bash", rendered)
+        self.assertIn("● Browser", rendered)
+        self.assertIn("● MCP", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()
+

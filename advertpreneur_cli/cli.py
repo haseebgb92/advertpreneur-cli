@@ -64,7 +64,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.26.1"
+VERSION = "0.27.0"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -244,6 +244,8 @@ class AdvertpreneurCLI:
                 ["git", "-C", str(project), "branch", "--show-current"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=3,
             )
             return (proc.stdout or "").strip()
@@ -358,7 +360,7 @@ class AdvertpreneurCLI:
         if not (self.project / ".git").exists():
             return
         try:
-            proc = subprocess.run(["git", "-C", str(self.project), "status", "--porcelain"], capture_output=True, text=True, timeout=3)
+            proc = subprocess.run(["git", "-C", str(self.project), "status", "--porcelain"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3)
             if proc.returncode == 0:
                 self.git_dirty_count = len([x for x in proc.stdout.splitlines() if x.strip()])
         except Exception:
@@ -965,18 +967,36 @@ class AdvertpreneurCLI:
             turn = int(data.get("turn") or 1)
             model = str(data.get("model") or self.active.model)
             self.ui.set_working_state("Thinking", model=model, turn=turn)
+        elif name == "model_thinking":
+            delta = str(data.get("delta") or "")
+            if delta and len(delta.strip()) > 3:
+                self.ui.thought_process(delta)
         elif name == "model_done":
             duration_ns = int(data.get("duration_ns") or 0)
             elapsed = duration_ns / 1_000_000_000 if duration_ns else 0.0
-            self.ui.success(f"response received · turn {data.get('turn')}" + (f" · {elapsed:.1f}s" if elapsed else ""))
             self.ui.set_working_state("Processing response")
         elif name == "validation_required":
             self.ui.set_working_state("Verifying requested validation")
             self.ui.muted("  ↳ completion gate · real build/test execution still required")
         elif name == "tool_start":
-            summary = self._tool_summary(str(data.get("name") or "tool"), data.get("args") or {})
-            self.ui.set_working_state("Using tool")
-            self.ui.info(summary)
+            tool_name = str(data.get("name") or "tool")
+            args = data.get("args") or {}
+            if tool_name == "replace_in_file":
+                self.ui.action_marker("edit", str(args.get("path", "")))
+            elif tool_name == "write_file":
+                self.ui.action_marker("write", str(args.get("path", "")))
+            elif tool_name == "read_file":
+                self.ui.action_marker("read", str(args.get("path", "")))
+            elif tool_name == "run_command":
+                self.ui.action_marker("bash", str(args.get("command", "")))
+            elif tool_name == "browser":
+                self.ui.action_marker("browser", f"{args.get('action', '')} {args.get('url', '') or args.get('selector', '')}".strip())
+            elif tool_name == "mcp":
+                self.ui.action_marker("mcp", f"{args.get('server', '')}:{args.get('tool', '')}")
+            else:
+                summary = self._tool_summary(tool_name, args)
+                self.ui.info(summary)
+            self.ui.set_working_state("Using tool", detail=tool_name)
         elif name == "tool_cached":
             self.ui.muted(f"  ↳ duplicate skipped · {self._tool_summary(str(data.get('name') or 'tool'), data.get('args') or {})}")
             self.ui.set_working_state("Reusing prior result")
@@ -3186,12 +3206,29 @@ class AdvertpreneurCLI:
             # update the current file when known, while commands/reasoning do not
             # replace the stable "coding" status with noisy transient phrases.
             if event.kind == "thinking":
-                # Heartbeat from AGY during a silent reasoning phase: update the
-                # spinner label with elapsed time so the TUI doesn't appear frozen.
+                # Heartbeat from provider during a reasoning phase
                 self.ui.set_working_state("Thinking", model=model or provider, detail=str(event.detail or ""), event_driven=True)
+                if event.detail and len(str(event.detail).strip()) > 3:
+                    self.ui.thought_process(str(event.detail))
                 return
             if event.kind == "tool":
                 self._external_tool_calls += 1
+                detail = str(event.detail or "").strip()
+                label_low = str(event.label or "").lower()
+                tool_low = str(event.tool or "").lower()
+                if "writing" in label_low or "create" in label_low or "write" in tool_low:
+                    self.ui.action_marker("write", detail)
+                elif "editing" in label_low or "edit" in tool_low or "replace" in tool_low:
+                    self.ui.action_marker("edit", detail)
+                elif "reading" in label_low or "read" in tool_low or "view" in tool_low:
+                    self.ui.action_marker("read", detail)
+                elif "bash" in tool_low or "command" in tool_low or "run" in tool_low or "powershell" in tool_low:
+                    self.ui.action_marker("bash", detail)
+                elif "browser" in tool_low:
+                    self.ui.action_marker("browser", detail)
+                elif detail:
+                    self.ui.action_marker(event.tool or "Action", detail)
+
             detail = str(event.detail or "").strip()
             label_low = str(event.label or "").lower()
             file_candidate = ""
@@ -3445,11 +3482,11 @@ class AdvertpreneurCLI:
             return
         try:
             if sys.platform == "win32":
-                subprocess.run(["clip.exe"], input=self.last_result, text=True, check=True)
+                subprocess.run(["clip.exe"], input=self.last_result, text=True, encoding="utf-8", errors="replace", check=True)
             elif sys.platform == "darwin":
-                subprocess.run(["pbcopy"], input=self.last_result, text=True, check=True)
+                subprocess.run(["pbcopy"], input=self.last_result, text=True, encoding="utf-8", errors="replace", check=True)
             elif shutil.which("xclip"):
-                subprocess.run(["xclip", "-selection", "clipboard"], input=self.last_result, text=True, check=True)
+                subprocess.run(["xclip", "-selection", "clipboard"], input=self.last_result, text=True, encoding="utf-8", errors="replace", check=True)
             else:
                 raise RuntimeError("No clipboard command found")
             self.ui.success("Latest result copied")

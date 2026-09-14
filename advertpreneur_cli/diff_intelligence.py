@@ -23,7 +23,14 @@ class DiffIntelligence:
         stats: dict[str, tuple[int, int]] = {}
         if baseline_ref and (self.root / ".git").exists():
             try:
-                p = subprocess.run(["git", "-C", str(self.root), "diff", "--numstat", baseline_ref, "--"], capture_output=True, text=True, timeout=8)
+                p = subprocess.run(
+                    ["git", "-C", str(self.root), "diff", "--numstat", baseline_ref, "--"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=8,
+                )
                 if p.returncode == 0:
                     for line in p.stdout.splitlines():
                         parts = line.split("\t", 2)

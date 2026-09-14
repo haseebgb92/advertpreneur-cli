@@ -88,7 +88,14 @@ class GitHubReleaseClient:
 
     def _run(self, args: list[str]) -> str:
         try:
-            completed = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=self.timeout)
+            completed = subprocess.run(
+                ["gh", *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=self.timeout,
+            )
         except FileNotFoundError as exc:
             raise UpdateError("GitHub CLI is required for private release updates") from exc
         except subprocess.TimeoutExpired as exc:

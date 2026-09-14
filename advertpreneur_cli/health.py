@@ -59,7 +59,14 @@ class HealthMonitor:
         if rss <= 0.0:
             try:
                 script = f"$p=Get-Process -Id {os.getpid()} -ErrorAction Stop; @{{rss=$p.WorkingSet64;peak=$p.PeakWorkingSet64}} | ConvertTo-Json -Compress"
-                row = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script], capture_output=True, text=True, timeout=4)
+                row = subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=4,
+                )
                 data = json.loads(row.stdout or "{}") if row.returncode == 0 else {}
                 rss = float(data.get("rss") or 0) / 1048576.0
                 peak = float(data.get("peak") or 0) / 1048576.0
@@ -92,7 +99,14 @@ class HealthMonitor:
         script = r'''$rows=Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,WorkingSetSize,CommandLine;
 $root=%d; $ids=@($root); $out=@(); do { $added=$false; foreach($r in $rows){ if(($ids -contains [int]$r.ParentProcessId) -and -not ($ids -contains [int]$r.ProcessId)){ $ids += [int]$r.ProcessId; $out += $r; $added=$true } } } while($added); $out | ConvertTo-Json -Compress''' % root_pid
         try:
-            p = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script], capture_output=True, text=True, timeout=8)
+            p = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=8,
+            )
             if p.returncode != 0 or not p.stdout.strip(): return []
             raw = json.loads(p.stdout)
             rows = raw if isinstance(raw, list) else [raw]
