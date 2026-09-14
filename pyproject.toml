@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "advertpreneur-cli"
-version = "0.25.0"
+version = "0.26.0"
 description = "Advertpreneur's interactive model-powered coding CLI"
 requires-python = ">=3.10"
 dependencies = [
