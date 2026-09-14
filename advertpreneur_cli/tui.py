@@ -1023,6 +1023,14 @@ class TerminalUI:
         choice = self.choose("Allow?", [MenuItem("yes", "Yes", "approve"), MenuItem("no", "No", "deny")])
         return choice == "yes"
 
+    def prompt_update_choice(self, current_ver: str, new_ver: str) -> str:
+        self.heading(f"Update Available · v{new_ver} (current: v{current_ver})")
+        items = [
+            MenuItem("update", "Update now", "download, verify and install immediately"),
+            MenuItem("ignore", "Ignore & continue", "proceed into current session"),
+        ]
+        return self.choose("Would you like to install the update now or ignore?", items, default="update")
+
     def heading(self, text: str) -> None:
         self.print_line(f"\n\x1b[1m{text}\x1b[0m")
 

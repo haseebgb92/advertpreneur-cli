@@ -56,11 +56,13 @@ from .missions import MissionStore, mission_steps_from_task_plan
 from .mission_daemon import MissionDaemon
 from .operation_router import LocalOperationRouter
 from .automation_memory import AutomationMemory
+from .self_healing import SelfHealingEngine
+from .browser_macro import BrowserMacroStore
 from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply_latest_update, release_is_newer
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.24.0"
+VERSION = "0.25.0"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -398,6 +400,8 @@ class AdvertpreneurCLI:
         self.missions = MissionStore(self.project)
         self.operation_router = LocalOperationRouter(self.project)
         self.automation_memory = AutomationMemory(self.project / ".advertpreneur")
+        self.self_healing = SelfHealingEngine(self.project)
+        self.browser_macros = BrowserMacroStore(self.project)
         self._current_task_plan = None
         self.handbook = ExperienceHandbook(APP_DIR, self.project)
         self.hooks = HookRunner(self.project, enabled=self.hooks_enabled)
@@ -2340,13 +2344,46 @@ class AdvertpreneurCLI:
     # ---------- local checkpoints / undo ----------
     def list_checkpoints(self) -> None:
         rows = self.checkpoints.list(30)
-        self.ui.heading("Advertpreneur checkpoints")
+        self.ui.heading("Advertpreneur Checkpoints · Time-Travel Explorer")
         if not rows:
             self.ui.muted("No recoverable agent changes yet")
             return
-        for cp in rows:
-            stamp = cp.created_at.replace("T", " ")[:16]
-            print(f"  {cp.id:<12} {stamp} · {len(cp.changed_files):>3} files · {cp.label}")
+        items = [
+            MenuItem(cp.id, f"{cp.id[:8]} · {cp.label}", f"{cp.created_at.replace('T', ' ')[:16]} · {len(cp.changed_files)} file(s)")
+            for cp in rows
+        ]
+        items.append(MenuItem("cancel", "Cancel", "exit checkpoint browser"))
+        selected_id = self.ui.choose("Select a checkpoint to inspect or restore:", items)
+        if not selected_id or selected_id == "cancel":
+            return
+        target = next((cp for cp in rows if cp.id == selected_id), None)
+        if not target:
+            return
+        self.ui.heading(f"Checkpoint {target.id[:8]} · {target.label}")
+        print(f"  Timestamp     {target.created_at.replace('T', ' ')[:19]}")
+        print(f"  Changed files {len(target.changed_files)}")
+        for f in target.changed_files[:10]:
+            print(f"    • {f}")
+        action = self.ui.choose("Action for this checkpoint:", [
+            MenuItem("restore", "Restore workspace to this checkpoint", "revert all files to this state"),
+            MenuItem("diff", "View unified diff", "see exact changes in this checkpoint"),
+            MenuItem("cancel", "Cancel", "do nothing"),
+        ])
+        if action == "diff":
+            diff_text = self.checkpoints.diff(target)
+            self.ui.heading("Unified Diff Preview")
+            if diff_text:
+                for line in diff_text.splitlines()[:60]:
+                    print("  " + line)
+            else:
+                self.ui.muted("No diff detected compared to current workspace.")
+        elif action == "restore":
+            if self.ui.confirm("restore_checkpoint", f"Restore {len(target.changed_files)} files to checkpoint {target.id[:8]}?"):
+                self.checkpoints.restore(target)
+                self.project_index.build(force=False)
+                self.ui.invalidate_workspace()
+                self._refresh_git_state()
+                self.ui.success(f"Workspace restored to checkpoint {target.id[:8]}")
 
     def undo_last(self) -> None:
         rows = self.checkpoints.list(1)
@@ -2436,6 +2473,36 @@ class AdvertpreneurCLI:
                 else:
                     self.ui.success(self.tools.browser_controller.learn_start(arg2))
                     self.ui.muted("Teach once using natural-language browser actions or direct /browser commands; then /browser learn stop.")
+                return
+            if low == "macros":
+                rows = self.browser_macros.list_macros()
+                self.ui.heading("Browser Macros")
+                if not rows:
+                    self.ui.muted("No macros recorded yet · /browser record <name>")
+                else:
+                    for row in rows: print(f"  {row}")
+                return
+            if low.startswith("record "):
+                m_name = text.split(maxsplit=1)[1].strip()
+                if m_name.lower() in {"stop", "end"}:
+                    saved = self.browser_macros.stop_recording()
+                    if saved:
+                        self.ui.success(f"Macro '{saved.name}' saved with {len(saved.steps)} step(s)")
+                    else:
+                        self.ui.muted("No active recording to stop")
+                else:
+                    self.browser_macros.start_recording(m_name)
+                    self.ui.success(f"Started recording macro '{m_name}' · perform browser actions then /browser record stop")
+                return
+            if low.startswith("play "):
+                m_name = text.split(maxsplit=1)[1].strip()
+                self.ui.begin_working(VERSION, f"Playing macro '{m_name}'", 1)
+                res = self.browser_macros.play(m_name, self.tools.browser_controller)
+                self.ui.end_working()
+                if res["ok"]:
+                    self.ui.success(f"Macro '{m_name}' completed successfully ({res['steps_run']} steps)")
+                else:
+                    self.ui.error(f"Macro '{m_name}' failed · {res['error']}")
                 return
             if low == "routines":
                 rows = self.tools.browser_controller.routine_names()
@@ -4067,13 +4134,12 @@ class AdvertpreneurCLI:
         if not sys.stdin.isatty():
             return
         try:
-            client = GitHubReleaseClient(self.update_repository, timeout=5)
+            client = GitHubReleaseClient(self.update_repository, timeout=4)
             _tag, manifest = client.latest_manifest()
             if not release_is_newer(manifest.version, VERSION):
                 return
-            self.ui.heading("Update Available")
-            self.ui.info(f"A new version v{manifest.version} is available (currently running v{VERSION}).")
-            if self.ui.confirm("update", f"Install v{manifest.version} now before starting Advertpreneur?"):
+            choice = self.ui.prompt_update_choice(VERSION, manifest.version)
+            if choice == "update":
                 self.ui.begin_working(VERSION, f"Installing v{manifest.version}", 1)
                 installed = apply_latest_update(VERSION, self.update_repository)
                 self.ui.end_working()
@@ -4086,7 +4152,7 @@ class AdvertpreneurCLI:
                     self.ui.info("Please restart Advertpreneur to use the new version.")
                     sys.exit(0)
             else:
-                self.ui.muted("Update deferred. You can update anytime with /update.")
+                self.ui.muted(f"Continuing with v{VERSION}. You can update anytime with /update.")
         except Exception:
             return
 

@@ -291,3 +291,10 @@ class CheckpointManager:
             archive.unlink()
         except OSError:
             pass
+
+    def diff(self, cp: Checkpoint) -> str:
+        """Return the unified diff between the checkpoint state and current workspace."""
+        if cp.mode == "git-tree":
+            p = self._run_git(["diff", cp.ref, "--", "."], timeout=15)
+            return p.stdout.strip()
+        return f"Checkpoint {cp.id[:8]} ({cp.label}) · {len(cp.changed_files)} changed file(s)"
