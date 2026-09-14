@@ -434,6 +434,7 @@ class TerminalUI:
         self._joke = random.choice(TECH_JOKES)
         self._joke_changed = time.monotonic()
         self._state_changed = 0.0
+        self._cockpit: dict[str, str] = {}
 
         @self.kb.add("c-l")
         def _(event) -> None:
@@ -542,12 +543,42 @@ class TerminalUI:
 
     def _composer_toolbar(self) -> FormattedText:
         parts: list[tuple[str, str]] = []
+        parts.extend(self._cockpit_parts())
         if self._live_active:
             parts.extend(self._live_status_parts())
             parts.extend(self._live_change_parts())
         parts.append(("class:joke", f"  {self._joke}\n"))
         parts.extend(list(self.toolbar()))
         return FormattedText(parts)
+
+    def set_cockpit(self, state: dict[str, object]) -> None:
+        """Project a bounded durable mission summary into the fixed composer UI."""
+        self._cockpit = {str(key): str(value) for key, value in dict(state or {}).items() if value not in (None, "")}
+        self._invalidate_live()
+
+    def clear_cockpit(self) -> None:
+        self._cockpit = {}
+        self._invalidate_live()
+
+    def _cockpit_parts(self) -> list[tuple[str, str]]:
+        state = getattr(self, "_cockpit", {}) or {}
+        if not state:
+            return []
+        mission = state.get("mission", "Mission")[:96]
+        step = state.get("step", "")[:96]
+        status = state.get("state", "active").lower()
+        activity = "waiting for input" if status == "waiting" else status
+        attention = state.get("attention", "")
+        evidence = state.get("evidence", "")
+        line = f"  Mission · {mission}"
+        if step:
+            line += f" · {step}"
+        line += f" · {activity}"
+        if evidence:
+            line += f" · Evidence {evidence}"
+        if attention:
+            line += f" · Attention: {attention}"
+        return [("class:working", line + "\n")]
 
     def _live_status_parts(self) -> list[tuple[str, str]]:
         """Render changing work state inside Prompt Toolkit's owned footer."""

@@ -51,6 +51,7 @@ from .verification import ProportionalVerifier
 from .diff_intelligence import DiffIntelligence
 from .packaging import ProjectPackager
 from .workforce import Workforce
+from .missions import MissionStore
 from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply_latest_update, release_is_newer
 from .tui import COMMANDS, MenuItem, TerminalUI
 
@@ -197,6 +198,7 @@ class AdvertpreneurCLI:
         self.current_session = self.session_store.create(self.project, self.active.provider, self.active.model)
         self.last_result = ""
         self._queued_messages: queue.Queue[tuple[bool, str]] = queue.Queue()
+        self._current_mission_id = ""
         self._approval_requests: queue.Queue[_PendingApproval] = queue.Queue()
         self._task_thread: threading.Thread | None = None
         self._task_lock = threading.RLock()
@@ -234,6 +236,26 @@ class AdvertpreneurCLI:
             return (proc.stdout or "").strip()
         except Exception:
             return ""
+
+    def _refresh_mission_cockpit(self) -> None:
+        mission_id = str(getattr(self, "_current_mission_id", "") or "")
+        if not mission_id:
+            return
+        try:
+            mission = self.missions.load(mission_id)
+        except (KeyError, OSError):
+            return
+        step = next((row for row in mission.steps if row.state in {"active", "waiting", "pending"}), None)
+        if step is None and mission.steps:
+            step = mission.steps[-1]
+        observed = sum(len(row.observed_evidence) for row in mission.steps)
+        required = sum(len(row.evidence) for row in mission.steps)
+        self.ui.set_cockpit({
+            "mission": mission.request,
+            "step": step.title if step else "",
+            "state": step.state if step else mission.status,
+            "evidence": f"{observed}/{required}",
+        })
 
     def _request_approval(self, kind: str, detail: str) -> bool:
         """Ask the owning CLI thread to render an approval prompt safely.
@@ -313,6 +335,7 @@ class AdvertpreneurCLI:
         self.diff_intelligence = DiffIntelligence(self.project)
         self.packager = ProjectPackager(self.project, self.project_contract)
         self.workforce = Workforce(self.project)
+        self.missions = MissionStore(self.project)
         self._current_task_plan = None
         self.handbook = ExperienceHandbook(APP_DIR, self.project)
         self.hooks = HookRunner(self.project, enabled=self.hooks_enabled)

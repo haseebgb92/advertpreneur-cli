@@ -1,4 +1,4 @@
-from advertpreneur_cli.missions import EvidenceItem, MissionStore
+from advertpreneur_cli.missions import EvidenceItem, MissionStore, mission_steps_from_task_plan
 
 
 def test_mission_store_creates_plan_and_tracks_step_states(tmp_path):
@@ -52,3 +52,17 @@ def test_attention_pauses_only_its_mission_and_resume_targets_same_step(tmp_path
     resumed = store.load(mission.id)
     assert resumed.steps[0].state == "active"
     assert resumed.status == "active"
+
+
+def test_task_plan_maps_to_inspect_browser_and_release_evidence_steps():
+    class Plan:
+        task_class = "release/package"
+        needs_browser = True
+        wants_full_validation = True
+        wants_package = True
+
+    steps = mission_steps_from_task_plan(Plan())
+
+    assert steps[0]["kind"] == "inspect"
+    assert any(step["kind"] == "browser" and step["evidence"] == ["browser_observation"] for step in steps)
+    assert any(step["kind"] == "release" and "release_asset" in step["evidence"] for step in steps)

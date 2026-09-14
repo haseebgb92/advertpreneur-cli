@@ -24,6 +24,20 @@ def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def mission_steps_from_task_plan(plan: Any) -> list[dict[str, Any]]:
+    """Translate deterministic planner signals into evidence-bearing mission steps."""
+    steps: list[dict[str, Any]] = [{"title": "Inspect the current state", "kind": "inspect", "evidence": ["inspection"]}]
+    if bool(getattr(plan, "needs_browser", False)):
+        steps.append({"title": "Inspect and verify browser state", "kind": "browser", "evidence": ["browser_observation"]})
+    if str(getattr(plan, "task_class", "")) in {"code change", "debug/fix"}:
+        steps.append({"title": "Apply scoped change", "kind": "code", "evidence": ["diff"]})
+    if bool(getattr(plan, "wants_full_validation", False)):
+        steps.append({"title": "Run required verification", "kind": "verify", "evidence": ["verification"]})
+    if bool(getattr(plan, "wants_package", False)):
+        steps.append({"title": "Build and inspect release artifact", "kind": "release", "evidence": ["release_asset"]})
+    return steps
+
+
 @dataclass
 class MissionStep:
     id: str
