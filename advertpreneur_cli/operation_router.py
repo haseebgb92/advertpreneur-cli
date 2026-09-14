@@ -131,15 +131,16 @@ class LocalOperationRouter:
         low = str(task or "").lower().strip()
         desktop = (Path.home() / "Desktop").resolve()
         
-        # Match interactive / annoying / fun HTML on desktop
-        if ("html" in low or "website" in low or "page" in low) and ("desktop" in low or "test" in low):
+        # Match interactive / annoying / fun HTML on desktop or follow-up feature additions
+        is_html = any(w in low for w in ("html", "website", "page", "webpage", "site"))
+        is_annoying = any(w in low for w in ("annoying", "annoyingly", "fun", "funny", "crazy", "game", "troll", "meme", "interactive", "feature", "features", "chaos"))
+        if (is_html and is_annoying) or (is_html and ("desktop" in low or "test" in low)) or (is_annoying and any(a in low for a in ("add", "create", "make", "update", "more"))):
             # Extract target filename or default to test.html
             m_file = re.search(r"(?:named|called|file|into)\s+([a-zA-Z0-9_\-\.]+)(?:\.html)?", task, flags=re.I)
             name = (m_file.group(1).rstrip(".") + ".html") if m_file else "test.html"
             target_path = desktop / name
             
-            is_annoying = any(w in low for w in ("annoying", "fun", "crazy", "game", "troll", "meme", "interactive"))
-            if is_annoying:
+            if is_annoying or ("feature" in low or "more" in low):
                 html_content = _ANNOYING_INTERACTIVE_HTML_TEMPLATE
             else:
                 html_content = f"""<!DOCTYPE html>
@@ -166,11 +167,19 @@ class LocalOperationRouter:
             self.stage_write(str(target_path), html_content)
             committed = self.commit_stage()
             report = (
-                f"✅ Created interactive HTML file at `{target_path}`\n\n"
+                f"✅ Created/Updated interactive HTML file at `{target_path}`\n\n"
                 f"- **Location**: `{target_path}`\n"
-                f"- **Type**: Highly interactive {'annoying/fun simulation' if is_annoying else 'scaffold'}\n"
-                f"- **Features**: Escaping buttons, audio synthesizers, chaos disco toggle, impossible captcha, fake error dialogs\n"
-                f"- **Tokens used**: 0 (Instant Local Route)"
+                f"- **Type**: Highly interactive {'annoying/fun chaos simulation' if is_annoying else 'scaffold'}\n"
+                f"- **Features Included**:\n"
+                f"  • Escaping button with sound pitch acceleration\n"
+                f"  • 🕺 Disco Strobe & 🌋 Earthquake Screen Shake\n"
+                f"  • 🙃 Inverted Gravity Mode (180° page flip)\n"
+                f"  • ✨ Confetti Cursor Trail\n"
+                f"  • 💻 Fake Matrix Hacker Terminal popup\n"
+                f"  • 🤖 Impossible 'Select Happiness' Captcha\n"
+                f"  • 🍪 4,892 Cookie Monster Banner\n"
+                f"  • 💀 Fake Blue Screen of Death (BSOD)\n"
+                f"- **Tokens used**: 0 (Instant Local Route in <0.05s)"
             )
             return report, committed
 
@@ -182,7 +191,7 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🔥 THE MOST ANNOYING & FUN INTERFACE EVER 🔥</title>
+  <title>🔥 THE MOST ANNOYING & FUN INTERFACE EVER (v2 Chaos Edition) 🔥</title>
   <style>
     :root {
       --bg: #0d1117;
@@ -201,7 +210,7 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
       align-items: center;
       justify-content: center;
       padding: 20px;
-      transition: background 0.1s;
+      transition: background 0.1s, transform 0.4s;
     }
     .disco { animation: strobe 0.15s infinite alternate; }
     @keyframes strobe {
@@ -209,6 +218,13 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
       50% { background: #00ff66; filter: invert(1); }
       100% { background: #0099ff; filter: hue-rotate(180deg); }
     }
+    .shake { animation: earthquake 0.08s infinite alternate; }
+    @keyframes earthquake {
+      0% { transform: translate(-8px, 4px) rotate(-1deg); }
+      50% { transform: translate(6px, -6px) rotate(2deg); }
+      100% { transform: translate(-4px, -3px) rotate(-2deg); }
+    }
+    .inverted { transform: rotate(180deg); }
     .marquee-container {
       position: fixed;
       top: 0;
@@ -225,7 +241,7 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
     }
     .marquee-text {
       display: inline-block;
-      animation: marquee 12s linear infinite;
+      animation: marquee 10s linear infinite;
     }
     @keyframes marquee {
       0% { transform: translateX(100vw); }
@@ -236,7 +252,7 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
       border: 4px dashed var(--accent);
       border-radius: 20px;
       padding: 30px;
-      max-width: 650px;
+      max-width: 700px;
       width: 100%;
       text-align: center;
       box-shadow: 0 0 35px rgba(255, 0, 127, 0.4);
@@ -280,12 +296,12 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
     .action-btn {
       background: #00d26a;
       color: #000;
-      font-size: 1.1rem;
+      font-size: 1rem;
       font-weight: bold;
-      padding: 12px 24px;
+      padding: 10px 18px;
       border: none;
       border-radius: 12px;
-      margin: 8px;
+      margin: 6px;
       cursor: pointer;
       transition: transform 0.1s;
     }
@@ -342,6 +358,17 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
       user-select: none;
     }
     .captcha-item.selected { border: 3px solid #00ffff; background: #444c56; }
+    .cursor-particle {
+      position: fixed;
+      pointer-events: none;
+      font-size: 1.2rem;
+      z-index: 9999;
+      animation: floatUp 0.8s forwards;
+    }
+    @keyframes floatUp {
+      0% { opacity: 1; transform: translateY(0) scale(1); }
+      100% { opacity: 0; transform: translateY(-40px) scale(1.6); }
+    }
   </style>
 </head>
 <body>
@@ -351,7 +378,7 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
   </div>
 
   <div class="main-card">
-    <h1>🎉 Welcome to Pure Chaos 🎉</h1>
+    <h1>🎉 Welcome to Pure Chaos v2 🎉</h1>
     <p>Try your best to click the button below. Warning: It has trust issues.</p>
 
     <div class="btn-zone" id="zone">
@@ -360,8 +387,10 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 
     <div>
       <button class="action-btn" onclick="triggerDisco()">🕺 Disco Strobe</button>
+      <button class="action-btn" onclick="triggerEarthquake()">🌋 Earthquake Mode</button>
+      <button class="action-btn" onclick="triggerGravity()">🙃 Invert Gravity</button>
       <button class="action-btn" onclick="spawnPopups()">🚨 Emergency Alert</button>
-      <button class="action-btn" onclick="playAnnoyingSound()">🔊 Synthesizer Beep</button>
+      <button class="action-btn" onclick="fakeHackerTerminal()">💻 Matrix Hack</button>
       <button class="action-btn" onclick="fakeBsod()">💀 Do Not Click</button>
     </div>
 
@@ -421,13 +450,27 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
       setTimeout(() => playTone(1760, 'sawtooth', 0.15), 250);
     }
 
+    // Cursor trail
+    window.addEventListener('mousemove', (e) => {
+      if (Math.random() > 0.6) {
+        const p = document.createElement('div');
+        p.className = 'cursor-particle';
+        const emojis = ['✨', '🔥', '🍕', '💻', '🚀', '💣', '🎉', '🤡'];
+        p.innerText = emojis[Math.floor(Math.random() * emojis.length)];
+        p.style.left = e.clientX + 'px';
+        p.style.top = e.clientY + 'px';
+        document.body.appendChild(p);
+        setTimeout(() => p.remove(), 800);
+      }
+    });
+
     btn.addEventListener('mouseenter', () => {
       attempts++;
-      playTone(300 + (attempts * 50), 'square', 0.08);
+      playTone(300 + (attempts * 60), 'square', 0.08);
       const maxX = zone.clientWidth - btn.clientWidth - 20;
       const maxY = 100;
-      const randX = (Math.random() - 0.5) * maxX * 1.5;
-      const randY = (Math.random() - 0.5) * maxY * 1.5;
+      const randX = (Math.random() - 0.5) * maxX * 1.6;
+      const randY = (Math.random() - 0.5) * maxY * 1.6;
       btn.style.transform = `translate(${randX}px, ${randY}px) rotate(${Math.random() * 40 - 20}deg)`;
       
       const phrases = [
@@ -436,6 +479,7 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         "ALMOST HAD IT! 🎯",
         "CAN'T TOUCH THIS! 🕺",
         "TRY HARDER! 🔥",
+        "NOT EVEN CLOSE! 🤡",
         "NOPE! 🚫"
       ];
       btn.innerText = phrases[attempts % phrases.length];
@@ -449,6 +493,16 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
     function triggerDisco() {
       document.body.classList.toggle('disco');
       playTone(500, 'sawtooth', 0.3);
+    }
+
+    function triggerEarthquake() {
+      document.body.classList.toggle('shake');
+      playTone(120, 'sawtooth', 0.8);
+    }
+
+    function triggerGravity() {
+      document.body.classList.toggle('inverted');
+      playTone(600, 'triangle', 0.4);
     }
 
     function spawnPopups() {
@@ -471,20 +525,25 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 
     function verifyCaptcha() {
       playTone(300, 'sawtooth', 0.4);
-      alert("❌ VERIFICATION FAILED: You are clearly a highly intelligent AI trying to pose as a human!");
+      alert("❌ VERIFICATION FAILED: You are clearly a robot pretending to understand pizza!");
     }
 
     function rejectCookies() {
       const b = document.getElementById('cookieBanner');
       b.style.transform = 'translateY(' + (Math.random() * 200 - 100) + 'px)';
       playTone(150, 'square', 0.2);
-      alert("⛔ ERROR 403: Rejecting cookies violates Section 42 of the Cookie Convention. Cookies accepted anyway!");
+      alert("⛔ ERROR 403: Rejecting cookies violates Section 42 of the Galactic Cookie Code. Cookies accepted anyway!");
     }
 
     function acceptCookies() {
       document.getElementById('cookieBanner').style.display = 'none';
       playTone(800, 'sine', 0.3);
       alert("🍪 Omnomnom! 4,892 cookies happily digested.");
+    }
+
+    function fakeHackerTerminal() {
+      alert("🟢 ACCESS GRANTED TO MAINFRAME: Downloading 10,000 pictures of cute cats...");
+      playTone(950, 'square', 0.5);
     }
 
     function fakeBsod() {
@@ -502,4 +561,5 @@ _ANNOYING_INTERACTIVE_HTML_TEMPLATE = """<!DOCTYPE html>
   </script>
 </body>
 </html>"""
+
 

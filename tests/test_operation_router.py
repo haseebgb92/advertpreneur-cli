@@ -55,7 +55,7 @@ class LocalOperationRouterTests(unittest.TestCase):
         self.assertIsNotNone(res)
         report, committed = res
         self.assertTrue(len(committed) > 0)
-        self.assertIn("Created interactive HTML", report)
+        self.assertIn("interactive HTML file", report)
         
         # Verify file exists on desktop
         desktop = (Path.home() / "Desktop").resolve()
@@ -65,7 +65,15 @@ class LocalOperationRouterTests(unittest.TestCase):
         self.assertIn("ANNOYING", content)
         self.assertIn("CLICK ME IF YOU CAN", content)
 
+        # Verify follow up prompt matches
+        follow_up = "add some more annoyingly funny features to the HTML."
+        res2 = self.router.fast_route(follow_up)
+        self.assertIsNotNone(res2)
+        report2, committed2 = res2
+        self.assertIn("interactive HTML file", report2)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -544,8 +544,6 @@ class TerminalUI:
     def _idle_joke_worker(self) -> None:
         while True:
             time.sleep(0.5)
-            if self._live_active:
-                continue
             now = time.monotonic()
             if now - self._joke_changed < 7.0:
                 continue
@@ -553,7 +551,10 @@ class TerminalUI:
             self._joke = random.choice(choices or TECH_JOKES)
             self._joke_changed = now
             try:
-                self.session.app.invalidate()
+                if self._live_active:
+                    self._invalidate_live()
+                else:
+                    self.session.app.invalidate()
             except Exception:
                 pass
 
