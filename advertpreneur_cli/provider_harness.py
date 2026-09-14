@@ -335,6 +335,7 @@ class _AgyStreamDriver:
     def _argv(self) -> List[str]:
         argv = [
             self.command,
+            "--print=",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
             "--print-timeout", f"{max(1, self.timeout // 60)}m",

@@ -77,6 +77,15 @@ def test_agy_coding_uses_accept_edits_sandbox(monkeypatch, tmp_path: Path):
     assert "--mode=accept-edits" in captured["argv"]
 
 
+def test_persistent_agy_stream_session_uses_print_mode_required_by_agy():
+    """AGY documents stream-json input as a print-mode protocol."""
+    from advertpreneur_cli.provider_harness import _AgyStreamDriver
+
+    driver = _AgyStreamDriver("agy", Path.cwd(), "", "medium", write=True)
+
+    assert "--print=" in driver._argv()
+
+
 def test_extension_has_visible_control_bar_and_verified_click():
     js = (Path(__file__).parents[1] / "advertpreneur_cli" / "browser_extension" / "background.js").read_text(encoding="utf-8")
     assert "Advertpreneur is controlling this tab" in js
