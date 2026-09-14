@@ -851,7 +851,7 @@ class TerminalUI:
             self.begin_working(label, state, 1)
 
     def thought_process(self, text: str) -> None:
-        """Render an Antigravity-style Thought Process marker."""
+        """Render a high-contrast ADP Thought Process reasoning block across all models."""
         clean = " ".join(str(text or "").split())
         if not clean:
             return
@@ -859,7 +859,7 @@ class TerminalUI:
         self._print_raw(f"\n  \x1b[1;38;2;188;140;255m▸ Thought Process\x1b[0m\n    \x1b[38;2;138;143;152m{preview}\x1b[0m\n")
 
     def action_marker(self, action: str, target: str) -> None:
-        """Render high-visibility Antigravity-style action items (Edit, Write, Read, Bash, Browser)."""
+        """Render high-visibility universal ADP action items (Edit, Write, Read, Bash, Browser, MCP) across all providers."""
         act = str(action or "").lower().strip()
         color_map = {
             "edit": "\x1b[1;38;2;88;166;255m● Edit\x1b[0m",
