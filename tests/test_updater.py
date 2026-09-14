@@ -23,6 +23,11 @@ class UpdaterTests(unittest.TestCase):
             with self.assertRaises(UpdateError):
                 verify_sha256(path, expected)
 
+    def test_client_accepts_timeout_parameter(self):
+        from advertpreneur_cli.updater import GitHubReleaseClient
+        client = GitHubReleaseClient("haseebgb92/advertpreneur-cli", timeout=5)
+        self.assertEqual(client.timeout, 5)
+
 
 if __name__ == "__main__":
     unittest.main()

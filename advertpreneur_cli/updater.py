@@ -80,14 +80,15 @@ class GitHubReleaseClient:
     Advertpreneur and GitHub's own credential manager owns authentication.
     """
 
-    def __init__(self, repository: str = DEFAULT_REPOSITORY) -> None:
+    def __init__(self, repository: str = DEFAULT_REPOSITORY, timeout: int = 45) -> None:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
             raise UpdateError("GitHub repository name is invalid")
         self.repository = repository
+        self.timeout = max(1, int(timeout))
 
     def _run(self, args: list[str]) -> str:
         try:
-            completed = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=45)
+            completed = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=self.timeout)
         except FileNotFoundError as exc:
             raise UpdateError("GitHub CLI is required for private release updates") from exc
         except subprocess.TimeoutExpired as exc:

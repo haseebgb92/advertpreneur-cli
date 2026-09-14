@@ -53,11 +53,12 @@ from .diff_intelligence import DiffIntelligence
 from .packaging import ProjectPackager
 from .workforce import Workforce
 from .missions import MissionStore, mission_steps_from_task_plan
+from .automation_memory import AutomationMemory
 from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply_latest_update, release_is_newer
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.22.2"
+VERSION = "0.23.0"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -256,11 +257,21 @@ class AdvertpreneurCLI:
             step = mission.steps[-1]
         observed = sum(len(row.observed_evidence) for row in mission.steps)
         required = sum(len(row.evidence) for row in mission.steps)
+        browser_count = ""
+        if hasattr(self, "tools") and hasattr(self.tools, "tool_browser"):
+            try:
+                b_st = self.tools.tool_browser("status")
+                if isinstance(b_st, dict) and "tabs" in b_st:
+                    browser_count = str(len(b_st["tabs"]))
+            except Exception:
+                pass
         self.ui.set_cockpit({
             "mission": mission.request,
             "step": step.title if step else "",
             "state": step.state if step else mission.status,
             "evidence": f"{observed}/{required}",
+            "browser_count": browser_count,
+            "verified": "verified" if mission.status == "completed" else "",
         })
 
     def _begin_task_mission(self, request: str) -> str:
@@ -383,6 +394,7 @@ class AdvertpreneurCLI:
         self.packager = ProjectPackager(self.project, self.project_contract)
         self.workforce = Workforce(self.project)
         self.missions = MissionStore(self.project)
+        self.automation_memory = AutomationMemory(self.project / ".advertpreneur")
         self._current_task_plan = None
         self.handbook = ExperienceHandbook(APP_DIR, self.project)
         self.hooks = HookRunner(self.project, enabled=self.hooks_enabled)
@@ -483,6 +495,10 @@ class AdvertpreneurCLI:
             handbook_context = self.handbook.context(task_text, max_chars=(plan.handbook_chars if plan else 1200))
             if handbook_context:
                 blocks.append(handbook_context)
+        if task_text and hasattr(self, "automation_memory"):
+            mem_context = self.automation_memory.context(task_text, max_chars=1000)
+            if mem_context:
+                blocks.append(mem_context)
 
         # Extension catalogues are lazy. Explicit names/terms opt them into this task.
         skill_needed = bool(plan.needs_plugins) if plan else any(x in text for x in ("skill", "plugin", "impeccable", "uiux", "ui/ux", "design system", "figma"))
@@ -4041,6 +4057,36 @@ class AdvertpreneurCLI:
             self.ui.success("Package verified · ZIP CRC clean · no obvious runtime/secret directories leaked")
 
     # ---------- GitHub release updates ----------
+    def _check_startup_update(self) -> None:
+        """Check for updates on startup and offer immediate installation before beginning the session."""
+        if os.environ.get("ADVERTPRENEUR_NO_UPDATE_CHECK"):
+            return
+        if not sys.stdin.isatty():
+            return
+        try:
+            client = GitHubReleaseClient(self.update_repository, timeout=5)
+            _tag, manifest = client.latest_manifest()
+            if not release_is_newer(manifest.version, VERSION):
+                return
+            self.ui.heading("Update Available")
+            self.ui.info(f"A new version v{manifest.version} is available (currently running v{VERSION}).")
+            if self.ui.confirm("update", f"Install v{manifest.version} now before starting Advertpreneur?"):
+                self.ui.begin_working(VERSION, f"Installing v{manifest.version}", 1)
+                installed = apply_latest_update(VERSION, self.update_repository)
+                self.ui.end_working()
+                if installed:
+                    self.ui.success(f"Updated to v{installed.version} successfully!")
+                    notes = client.latest_notes()
+                    if notes:
+                        self.ui.heading("What's new")
+                        self.ui.muted(notes[:1800])
+                    self.ui.info("Please restart Advertpreneur to use the new version.")
+                    sys.exit(0)
+            else:
+                self.ui.muted("Update deferred. You can update anytime with /update.")
+        except Exception:
+            return
+
     def _check_updates_async(self) -> None:
         """Look for a newer private release without delaying the first prompt."""
         def worker() -> None:
@@ -4256,12 +4302,19 @@ class AdvertpreneurCLI:
     def run(self) -> int:
         clear()
         self.ui.banner(VERSION, self.project)
+        self._check_startup_update()
         if self.credential_error:
             self.ui.error(self.credential_error)
         if self.active.provider == "cloud" and not self.api_key:
             self.ui.muted("Ollama Cloud is not logged in · use /login, or choose a Local model with /model")
         if self.current_session.bridge_enabled:
             self._bridge_register(True)
+        try:
+            recovered = self.missions.recover_interrupted()
+            if recovered:
+                self.ui.info(f"Mission control · recovered {len(recovered)} interrupted mission(s) from previous run")
+        except Exception:
+            pass
 
         pending_raw: str | None = None
         bridge_hops = 0

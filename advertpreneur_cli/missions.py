@@ -26,15 +26,15 @@ def _now() -> str:
 
 def mission_steps_from_task_plan(plan: Any) -> list[dict[str, Any]]:
     """Translate deterministic planner signals into evidence-bearing mission steps."""
-    steps: list[dict[str, Any]] = [{"title": "Inspect the current state", "kind": "inspect", "evidence": ["inspection"]}]
+    steps: list[dict[str, Any]] = [{"title": "Inspect the current state", "kind": "inspect", "action_kind": "inspect", "risk": "low", "evidence": ["inspection"], "evidence_requirements": ["inspection"]}]
     if bool(getattr(plan, "needs_browser", False)):
-        steps.append({"title": "Inspect and verify browser state", "kind": "browser", "evidence": ["browser_observation"]})
+        steps.append({"title": "Inspect and verify browser state", "kind": "browser", "action_kind": "browser", "risk": "medium", "evidence": ["browser_observation"], "evidence_requirements": ["browser_observation"]})
     if str(getattr(plan, "task_class", "")) in {"code change", "debug/fix"}:
-        steps.append({"title": "Apply scoped change", "kind": "code", "evidence": ["diff"]})
+        steps.append({"title": "Apply scoped change", "kind": "code", "action_kind": "edit", "risk": "medium", "evidence": ["diff"], "evidence_requirements": ["diff"]})
     if bool(getattr(plan, "wants_full_validation", False)):
-        steps.append({"title": "Run required verification", "kind": "verify", "evidence": ["verification"]})
+        steps.append({"title": "Run required verification", "kind": "verify", "action_kind": "test", "risk": "low", "evidence": ["verification"], "evidence_requirements": ["verification"]})
     if bool(getattr(plan, "wants_package", False)):
-        steps.append({"title": "Build and inspect release artifact", "kind": "release", "evidence": ["release_asset"]})
+        steps.append({"title": "Build and inspect release artifact", "kind": "release", "action_kind": "build", "risk": "medium", "evidence": ["release_asset"], "evidence_requirements": ["release_asset"]})
     return steps
 
 
@@ -46,6 +46,12 @@ class MissionStep:
     state: str = "pending"
     evidence: list[str] = field(default_factory=list)
     observed_evidence: list["EvidenceItem"] = field(default_factory=list)
+    action_kind: str = "inspect"
+    risk: str = "low"
+    depends_on: list[str] = field(default_factory=list)
+    attempts: int = 0
+    last_error: str = ""
+    evidence_requirements: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "MissionStep":
@@ -56,6 +62,12 @@ class MissionStep:
             state=str(value.get("state") or "pending"),
             evidence=[str(item) for item in value.get("evidence", [])],
             observed_evidence=[EvidenceItem.from_dict(item) for item in value.get("observed_evidence", []) if isinstance(item, dict)],
+            action_kind=str(value.get("action_kind") or value.get("kind") or "inspect"),
+            risk=str(value.get("risk") or "low"),
+            depends_on=[str(item) for item in value.get("depends_on", [])],
+            attempts=int(value.get("attempts", 0)),
+            last_error=str(value.get("last_error") or ""),
+            evidence_requirements=[str(item) for item in value.get("evidence_requirements", value.get("evidence", []))],
         )
 
 
@@ -88,6 +100,11 @@ class Mission:
     created_at: str
     updated_at: str
     steps: list[MissionStep]
+    project: str = ""
+    result: dict[str, Any] = field(default_factory=dict)
+    resources: dict[str, Any] = field(default_factory=dict)
+    attention: list[dict[str, Any]] = field(default_factory=list)
+    checkpoints: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "Mission":
@@ -98,6 +115,11 @@ class Mission:
             created_at=str(value.get("created_at") or _now()),
             updated_at=str(value.get("updated_at") or _now()),
             steps=[MissionStep.from_dict(item) for item in value.get("steps", []) if isinstance(item, dict)],
+            project=str(value.get("project") or ""),
+            result=dict(value.get("result") or {}),
+            resources=dict(value.get("resources") or {}),
+            attention=list(value.get("attention") or []),
+            checkpoints=[str(item) for item in value.get("checkpoints", [])],
         )
 
 
@@ -176,12 +198,17 @@ class MissionStore:
             status="planned",
             created_at=created,
             updated_at=created,
+            project=str(self.project),
             steps=[
                 MissionStep(
                     id=uuid.uuid4().hex[:12],
                     title=str(item.get("title") or "Untitled step"),
                     kind=str(item.get("kind") or "inspect"),
                     evidence=[str(entry) for entry in item.get("evidence", [])],
+                    action_kind=str(item.get("action_kind") or item.get("kind") or "inspect"),
+                    risk=str(item.get("risk") or "low"),
+                    depends_on=[str(entry) for entry in item.get("depends_on", [])],
+                    evidence_requirements=[str(entry) for entry in item.get("evidence_requirements", item.get("evidence", []))],
                 )
                 for item in steps
             ],

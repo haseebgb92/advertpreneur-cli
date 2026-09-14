@@ -582,12 +582,28 @@ class TerminalUI:
         activity = "waiting for input" if status == "waiting" else status
         attention = state.get("attention", "")
         evidence = state.get("evidence", "")
+        action = state.get("action", "")
+        browsers = state.get("browser_count", "")
+        downloads = state.get("download_count", "")
+        changes = state.get("changes", "")
+        verified = state.get("verified", "")
+
         line = f"  Mission · {mission}"
         if step:
             line += f" · {step}"
         line += f" · {activity}"
+        if action:
+            line += f" · Action {action}"
+        if browsers:
+            line += f" · Tabs {browsers}"
+        if downloads:
+            line += f" · Downloads {downloads}"
+        if changes:
+            line += f" · {changes}"
         if evidence:
             line += f" · Evidence {evidence}"
+        if verified:
+            line += f" · {verified}"
         if attention:
             line += f" · Attention: {attention}"
         return [("class:working", line + "\n")]
