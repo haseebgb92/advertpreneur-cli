@@ -76,7 +76,34 @@ def test_browser_controller_exposes_a_download_marker_and_waiter(tmp_path: Path,
     assert controller.mark_download() == 42
     assert controller.wait_for_download(42, timeout_seconds=12) == Path("C:/Downloads/report.csv")
     assert calls[0][0] == "download_mark"
-    assert calls[1] == ("download_wait", {"timeout": 24.0, "marker": 42, "timeout_ms": 12000})
+    assert calls[1] == ("download_wait", {"timeout": 24.0, "marker": 42, "timeout_ms": 12000, "tab": "work"})
+
+
+def test_browser_controller_routes_navigation_and_spawn_capture_to_named_tabs(tmp_path: Path, monkeypatch):
+    controller = BrowserController(tmp_path)
+    calls = []
+
+    def fake_call(action, **kwargs):
+        calls.append((action, kwargs))
+        return {"provider": "existing-edge/extension", "url": "https://example.test", "title": "Example", "verified": True}
+
+    monkeypatch.setattr(controller, "_extension_call", fake_call)
+    monkeypatch.setattr(controller, "_extension_available", lambda **_kwargs: True)
+
+    controller.navigate("https://amazon.com", tab="amazon")
+    controller.click("#launch", tab="access", capture_tab="helium")
+
+    assert calls[0] == ("navigate", {"timeout": 45, "url": "https://amazon.com", "wait_until": "domcontentloaded", "timeout_ms": 35000, "tab": "amazon"})
+    assert calls[1] == ("click", {"timeout": 25, "selector": "#launch", "verify_ms": 8000, "tab": "access", "capture_tab": "helium"})
+
+
+def test_browser_extension_implements_named_tab_slots_in_both_release_copies():
+    root = Path(__file__).parents[1]
+    for source in (root / "browser-extension" / "background.js", root / "advertpreneur_cli" / "browser_extension" / "background.js"):
+        text = source.read_text(encoding="utf-8")
+        assert "TAB_SLOTS_KEY" in text
+        assert "capture_tab" in text
+        assert "chrome.tabs.query({ windowId })" in text
 
 
 def test_browser_research_actions_search_export_and_rename_without_per_keyword_approval(tmp_path: Path):
@@ -89,11 +116,12 @@ def test_browser_research_actions_search_export_and_rename_without_per_keyword_a
 
         def _extension_available(self, **_kwargs): return True
         def inspect(self, *_args, **_kwargs): return '{"title":"Amazon search","url":"https://www.amazon.com/s?k=baby+sleep+sack"}'
-        def fill(self, selector, value): return f"filled {selector} {value}"
-        def click(self, selector): return f"clicked {selector}"
-        def wait(self, milliseconds): return f"waited {milliseconds}"
-        def mark_download(self): return 8
-        def wait_for_download(self, marker, timeout_seconds): return source
+        def fill(self, selector, value, **_kwargs): return f"filled {selector} {value}"
+        def click(self, selector, **_kwargs): return f"clicked {selector}"
+        def wait(self, milliseconds, **_kwargs): return f"waited {milliseconds}"
+        def mark_download(self, **_kwargs): return 8
+        def wait_for_download(self, marker, timeout_seconds, **_kwargs): return source
+        def navigate(self, *_args, **_kwargs): return "refreshed"
 
     tools = ToolRegistry(tmp_path, approval_mode="safe")
     tools.browser_controller = Browser()
@@ -126,6 +154,8 @@ def test_amazon_xray_task_exposes_browser_research_actions(tmp_path: Path):
     browser = next(item for item in schemas if item["function"]["name"] == "browser")
 
     assert "research_export" in browser["function"]["parameters"]["properties"]["action"]["enum"]
+    assert "tab" in browser["function"]["parameters"]["properties"]
+    assert "capture_tab" in browser["function"]["parameters"]["properties"]
 
 
 def test_external_provider_contract_instructs_research_checkpoint_handling():
@@ -133,6 +163,13 @@ def test_external_provider_contract_instructs_research_checkpoint_handling():
 
     assert "research_start" in contract
     assert "verification" in contract
+    assert "10001" in contract
+    assert "load more" in contract
+
+
+def test_research_checkpoint_detection_does_not_treat_a_bare_mfa_word_as_a_challenge():
+    assert ToolRegistry._research_pause_reason('{"text":"MFA settings and account help"}') == ""
+    assert ToolRegistry._research_pause_reason('{"text":"Please verify you are human before continuing"}') == "human verification page detected"
 
 
 def test_browser_research_run_processes_a_saved_selector_queue(tmp_path: Path):
@@ -148,11 +185,12 @@ def test_browser_research_run_processes_a_saved_selector_queue(tmp_path: Path):
 
         def _extension_available(self, **_kwargs): return True
         def inspect(self, *_args, **_kwargs): return '{"title":"Amazon search","url":"https://www.amazon.com/s"}'
-        def fill(self, *_args): return "filled"
-        def click(self, *_args): return "clicked"
-        def wait(self, *_args): return "waited"
-        def mark_download(self): return 9
+        def fill(self, *_args, **_kwargs): return "filled"
+        def click(self, *_args, **_kwargs): return "clicked"
+        def wait(self, *_args, **_kwargs): return "waited"
+        def mark_download(self, **_kwargs): return 9
         def wait_for_download(self, *_args, **_kwargs): return downloads.pop(0)
+        def navigate(self, *_args, **_kwargs): return "refreshed"
 
     tools = ToolRegistry(tmp_path, approval_mode="safe")
     tools.browser_controller = Browser()
@@ -163,3 +201,43 @@ def test_browser_research_run_processes_a_saved_selector_queue(tmp_path: Path):
 
     assert "2 completed" in result
     assert ResearchRun.open(tmp_path, "Baby Run").status()["completed"] == ["baby sleep sack", "baby swaddle"]
+
+
+def test_research_runner_pins_every_browser_action_to_amazon_and_refreshes_after_export(tmp_path: Path):
+    source = tmp_path / "downloads" / "xray.csv"
+    source.parent.mkdir()
+    source.write_text("xray", encoding="utf-8")
+    calls = []
+
+    class Browser:
+        current_url = "https://www.amazon.com/s"
+        def _extension_available(self, **_kwargs): return True
+        def inspect(self, *_args, **kwargs): calls.append(("inspect", kwargs)); return '{"title":"Amazon","url":"https://www.amazon.com/s"}'
+        def fill(self, *_args, **kwargs): calls.append(("fill", kwargs)); return "filled"
+        def click(self, *_args, **kwargs): calls.append(("click", kwargs)); return "clicked"
+        def wait(self, *_args, **kwargs): calls.append(("wait", kwargs)); return "waited"
+        def mark_download(self, **kwargs): calls.append(("mark_download", kwargs)); return 4
+        def wait_for_download(self, *_args, **kwargs): calls.append(("wait_for_download", kwargs)); return source
+        def navigate(self, *_args, **kwargs): calls.append(("navigate", kwargs)); return "refreshed"
+
+    tools = ToolRegistry(tmp_path, approval_mode="safe")
+    tools.browser_controller = Browser()
+    tools.tool_browser("research_start", name="Baby Run", value="baby sleep sack")
+    ResearchRun.open(tmp_path, "Baby Run").remember_selectors(search="#search", submit="#submit", export="#export")
+
+    tools.tool_browser("research_run", name="Baby Run", milliseconds=250)
+
+    assert all(kwargs.get("tab") == "amazon" for _name, kwargs in calls)
+    assert ("navigate", {"tab": "amazon"}) in calls
+
+
+def test_safe_mode_does_not_prompt_for_non_destructive_browser_clicks_or_fills(tmp_path: Path):
+    class Browser:
+        def click(self, *_args, **_kwargs): return "clicked"
+        def fill(self, *_args, **_kwargs): return "filled"
+
+    tools = ToolRegistry(tmp_path, approval_mode="safe", approve=lambda *_args: (_ for _ in ()).throw(AssertionError("unexpected approval")))
+    tools.browser_controller = Browser()
+
+    assert tools.tool_browser("click", selector="#launch", tab="access") == "clicked"
+    assert tools.tool_browser("fill", selector="#search", value="keyword", tab="amazon") == "filled"

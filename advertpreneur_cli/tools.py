@@ -83,7 +83,7 @@ RESEARCH_SCHEMAS = [
 BROWSER_SCHEMAS = [
     tool_schema("browser", "Control the user's local browser. Prefer measured reverse-engineering over visual guessing. Browser actions must be verified by observable state. Learned routines replay deterministic browser steps without model rediscovery.", {
         "action": {"type": "string", "enum": ["status", "operations_status", "navigate", "open", "site_detect", "site_profile", "site_playbook", "site_open", "site_upload", "inspect", "screenshot", "reverse_engineer", "click", "fill", "scroll", "wait", "upload", "wordpress_state", "workspace_list", "workspace_stage", "workspace_zip", "workspace_extract", "workspace_move", "wordpress_propose_delete", "wordpress_approve_delete", "wordpress_delete", "research_start", "research_status", "research_search", "research_export", "research_run", "research_pause", "research_resume", "run_routine", "routine_list", "close"]},
-        "url": {"type": "string"}, "selector": {"type": "string"}, "name": {"type": "string"},
+        "url": {"type": "string"}, "selector": {"type": "string"}, "name": {"type": "string"}, "tab": {"type": "string", "description": "Named Browser Bridge tab slot, such as access, helium, or amazon"}, "capture_tab": {"type": "string", "description": "Save a new tab opened by click into this named slot"},
         "value": {"type": "string"}, "amount": {"type": ["integer", "string"]}, "milliseconds": {"type": "integer"}, "repeat": {"type": "integer"},
         "max_elements": {"type": "integer"}, "full_page": {"type": "boolean"}, "file_path": {"type": "string"}, "proposal_id": {"type": "string"}, "approval_token": {"type": "string"},
     }, ["action"]),
@@ -497,8 +497,10 @@ class ToolRegistry:
             ("access denied", "access warning detected"),
             ("too many requests", "rate warning detected"),
             ("rate limit", "rate warning detected"),
-            ("two-factor", "two-factor authentication is required"),
-            ("mfa", "multi-factor authentication is required"),
+            ("two-factor authentication", "two-factor authentication is required"),
+            ("multi-factor authentication", "multi-factor authentication is required"),
+            ("enter your mfa code", "multi-factor authentication is required"),
+            ("authentication code", "multi-factor authentication is required"),
             ("sign in", "sign-in is required"),
             ("log in", "sign-in is required"),
         )
@@ -510,7 +512,7 @@ class ToolRegistry:
         return ResearchRun.open(self.root, name)
 
     def tool_browser(
-        self, action: str, url: str = "", selector: str = "", name: str = "design-map",
+        self, action: str, url: str = "", selector: str = "", name: str = "design-map", tab: str = "work", capture_tab: str = "",
         value: str = "", amount: int | str = 650, milliseconds: int = 750, repeat: int = 1,
         max_elements: int = 120, full_page: bool = True, file_path: str = "", proposal_id: str = "", approval_token: str = "",
     ) -> str:
@@ -533,7 +535,7 @@ class ToolRegistry:
             if action in {"navigate", "open"}:
                 if not url:
                     raise ToolError("browser navigate requires url")
-                result = self.browser_controller.navigate(url)
+                result = self.browser_controller.navigate(url, tab=tab)
                 return result + self._auto_site_profile(url)
             if action == "site_detect":
                 adapter = self.site_adapters.detect(url or self.browser_controller.current_url)
@@ -622,7 +624,7 @@ class ToolRegistry:
                 submit_selector = value or known.get("submit", "")
                 if not selector or not submit_selector:
                     raise ToolError("research_search requires selector for the observed search field and value for the observed submit control")
-                observed = self.browser_controller.inspect("body", max_elements=80)
+                observed = self.browser_controller.inspect("body", max_elements=80, tab="amazon")
                 reason = self._research_pause_reason(observed)
                 if reason:
                     raise ToolError(f"Research checkpoint: {reason}. Complete it in the browser, then retry this action.")
@@ -630,10 +632,10 @@ class ToolRegistry:
                 if not keyword:
                     return "Research run has no pending keywords"
                 try:
-                    self.browser_controller.fill(selector, keyword)
-                    self.browser_controller.click(submit_selector)
-                    self.browser_controller.wait(max(250, min(8_000, int(milliseconds))))
-                    after = self.browser_controller.inspect("body", max_elements=80)
+                    self.browser_controller.fill(selector, keyword, tab="amazon")
+                    self.browser_controller.click(submit_selector, tab="amazon")
+                    self.browser_controller.wait(max(250, min(8_000, int(milliseconds))), tab="amazon")
+                    after = self.browser_controller.inspect("body", max_elements=80, tab="amazon")
                     reason = self._research_pause_reason(after)
                     if reason:
                         run.pause(keyword, reason, self.browser_controller.current_url)
@@ -652,17 +654,18 @@ class ToolRegistry:
                 if not active:
                     raise ToolError("No active keyword to export; use research_search first")
                 keyword = str(active[0])
-                observed = self.browser_controller.inspect("body", max_elements=80)
+                observed = self.browser_controller.inspect("body", max_elements=80, tab="amazon")
                 reason = self._research_pause_reason(observed)
                 if reason:
                     run.pause(keyword, reason, self.browser_controller.current_url)
                     return f"Research paused · {keyword} · {reason}"
                 try:
-                    marker = self.browser_controller.mark_download()
-                    self.browser_controller.click(selector)
-                    source = self.browser_controller.wait_for_download(marker, timeout_seconds=max(5, min(120, int(milliseconds))))
+                    marker = self.browser_controller.mark_download(tab="amazon")
+                    self.browser_controller.click(selector, tab="amazon")
+                    source = self.browser_controller.wait_for_download(marker, timeout_seconds=max(5, min(120, int(milliseconds)),), tab="amazon")
                     target = run.complete_download(keyword, source, self.browser_controller.current_url)
                     run.remember_selectors(export=selector)
+                    self.browser_controller.navigate(self.browser_controller.current_url, tab="amazon")
                     return f"Xray report recorded · {keyword} · {target.relative_to(self.root).as_posix()}"
                 except Exception as exc:
                     run.pause(keyword, f"export action failed: {exc}", self.browser_controller.current_url)
@@ -679,7 +682,7 @@ class ToolRegistry:
                     if active:
                         keyword = str(active[0])
                     else:
-                        observed = self.browser_controller.inspect("body", max_elements=80)
+                        observed = self.browser_controller.inspect("body", max_elements=80, tab="amazon")
                         reason = self._research_pause_reason(observed)
                         if reason:
                             return f"Research checkpoint · {reason} · {len(run.status()['completed']) - before} completed"
@@ -687,10 +690,10 @@ class ToolRegistry:
                         if not keyword:
                             return f"Research run complete · {len(run.status()['completed']) - before} completed · {len(run.status()['paused'])} paused"
                         try:
-                            self.browser_controller.fill(known["search"], keyword)
-                            self.browser_controller.click(known["submit"])
-                            self.browser_controller.wait(max(250, min(8_000, int(milliseconds))))
-                            after = self.browser_controller.inspect("body", max_elements=80)
+                            self.browser_controller.fill(known["search"], keyword, tab="amazon")
+                            self.browser_controller.click(known["submit"], tab="amazon")
+                            self.browser_controller.wait(max(250, min(8_000, int(milliseconds))), tab="amazon")
+                            after = self.browser_controller.inspect("body", max_elements=80, tab="amazon")
                             reason = self._research_pause_reason(after)
                             if reason:
                                 run.pause(keyword, reason, self.browser_controller.current_url)
@@ -699,20 +702,21 @@ class ToolRegistry:
                             run.pause(keyword, f"search action failed: {exc}", self.browser_controller.current_url)
                             raise
                     try:
-                        observed = self.browser_controller.inspect("body", max_elements=80)
+                        observed = self.browser_controller.inspect("body", max_elements=80, tab="amazon")
                         reason = self._research_pause_reason(observed)
                         if reason:
                             run.pause(keyword, reason, self.browser_controller.current_url)
                             return f"Research paused · {keyword} · {reason} · {len(run.status()['completed']) - before} completed"
-                        marker = self.browser_controller.mark_download()
-                        self.browser_controller.click(known["export"])
-                        source = self.browser_controller.wait_for_download(marker, timeout_seconds=max(5, min(120, int(milliseconds))))
+                        marker = self.browser_controller.mark_download(tab="amazon")
+                        self.browser_controller.click(known["export"], tab="amazon")
+                        source = self.browser_controller.wait_for_download(marker, timeout_seconds=max(5, min(120, int(milliseconds))), tab="amazon")
                         run.complete_download(keyword, source, self.browser_controller.current_url)
+                        self.browser_controller.navigate(self.browser_controller.current_url, tab="amazon")
                     except Exception as exc:
                         run.pause(keyword, f"export action failed: {exc}", self.browser_controller.current_url)
                         raise
             if action == "inspect":
-                return self.browser_controller.inspect(selector or "body", max_elements=max_elements)
+                return self.browser_controller.inspect(selector or "body", max_elements=max_elements, tab=tab)
             if action == "screenshot":
                 return self.browser_controller.screenshot(name=name or "page", selector=selector, full_page=full_page)
             if action == "reverse_engineer":
@@ -720,19 +724,15 @@ class ToolRegistry:
             if action == "click":
                 if not selector:
                     raise ToolError("browser click requires selector")
-                if self.approval_mode != "full" and not self.approve("browser", f"click {selector}"):
-                    raise ToolError("User declined browser click.")
-                return self.browser_controller.click(selector)
+                return self.browser_controller.click(selector, tab=tab, capture_tab=capture_tab)
             if action == "fill":
                 if not selector:
                     raise ToolError("browser fill requires selector")
-                if self.approval_mode != "full" and not self.approve("browser", f"fill {selector} ({len(str(value))} chars)"):
-                    raise ToolError("User declined browser fill.")
-                return self.browser_controller.fill(selector, value)
+                return self.browser_controller.fill(selector, value, tab=tab)
             if action == "scroll":
-                return self.browser_controller.scroll(amount)
+                return self.browser_controller.scroll(amount, tab=tab)
             if action == "wait":
-                return self.browser_controller.wait(milliseconds)
+                return self.browser_controller.wait(milliseconds, tab=tab)
             if action == "routine_list":
                 rows = self.browser_controller.routine_names()
                 return "Learned browser routines: " + (", ".join(rows) if rows else "none")

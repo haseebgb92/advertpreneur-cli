@@ -1,11 +1,14 @@
 import unittest
 import io
+import queue
+import threading
 from contextlib import redirect_stdout
 from unittest import mock
 
 from prompt_toolkit.document import Document
 
 from advertpreneur_cli.tui import SlashCompleter, TerminalUI
+from advertpreneur_cli.cli import AdvertpreneurCLI
 
 
 class TuiTests(unittest.TestCase):
@@ -179,6 +182,47 @@ class TuiTests(unittest.TestCase):
         self.assertIn("Updated homepage", rendered)
         self.assertIn("index.html", rendered)
         self.assertIn("tests passed", rendered)
+
+    def test_prompt_interrupt_is_scheduled_on_the_prompt_toolkit_loop(self):
+        ui = object.__new__(TerminalUI)
+        ui._prompt_active = True
+        loop = mock.Mock()
+        ui.session = mock.Mock()
+        ui.session.app.loop = loop
+
+        assert ui.interrupt_prompt("__approval__") is True
+        loop.call_soon_threadsafe.assert_called_once()
+        callback = loop.call_soon_threadsafe.call_args.args[0]
+        callback()
+        ui.session.app.exit.assert_called_once_with(result="__approval__")
+
+    def test_worker_approval_is_served_by_the_cli_thread(self):
+        cli = object.__new__(AdvertpreneurCLI)
+        cli._approval_requests = queue.Queue()
+
+        class UI:
+            def __init__(self):
+                self.interrupted = threading.Event()
+                self.confirm_calls = []
+
+            def interrupt_prompt(self, _result):
+                self.interrupted.set()
+                return True
+
+            def confirm(self, kind, detail):
+                self.confirm_calls.append((kind, detail))
+                return True
+
+        cli.ui = UI()
+        answer = []
+        worker = threading.Thread(target=lambda: answer.append(cli._request_approval("browser", "click #export")))
+        worker.start()
+        assert cli.ui.interrupted.wait(timeout=1)
+
+        assert cli._serve_pending_approval() is True
+        worker.join(timeout=1)
+        assert answer == [True]
+        assert cli.ui.confirm_calls == [("browser", "click #export")]
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
@@ -54,8 +55,17 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.21.4"
+VERSION = "0.21.5"
 APP_DIR = Path.home() / ".advertpreneur-cli"
+_APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
+
+
+@dataclass
+class _PendingApproval:
+    kind: str
+    detail: str
+    done: threading.Event = field(default_factory=threading.Event)
+    approved: bool = False
 
 
 def money(v: float) -> str:
@@ -187,6 +197,7 @@ class AdvertpreneurCLI:
         self.current_session = self.session_store.create(self.project, self.active.provider, self.active.model)
         self.last_result = ""
         self._queued_messages: queue.Queue[tuple[bool, str]] = queue.Queue()
+        self._approval_requests: queue.Queue[_PendingApproval] = queue.Queue()
         self._task_thread: threading.Thread | None = None
         self._task_lock = threading.RLock()
         self.git_branch = ""
@@ -223,6 +234,37 @@ class AdvertpreneurCLI:
             return (proc.stdout or "").strip()
         except Exception:
             return ""
+
+    def _request_approval(self, kind: str, detail: str) -> bool:
+        """Ask the owning CLI thread to render an approval prompt safely.
+
+        Provider and tool work happens on a background thread while the main
+        thread owns Prompt Toolkit's composer.  Calling ``ui.confirm`` directly
+        from the worker races Prompt Toolkit's event loop on Windows.  Queue the
+        request, wake the composer, and wait for the main loop to answer it.
+        """
+        if threading.current_thread() is threading.main_thread():
+            return self.ui.confirm(kind, detail)
+        request = _PendingApproval(str(kind), str(detail))
+        self._approval_requests.put(request)
+        if not self.ui.interrupt_prompt(_APPROVAL_WAKE):
+            # There is no safe terminal owner to ask right now.  Denying is safer
+            # than opening a second Prompt Toolkit application from this worker.
+            return False
+        request.done.wait()
+        return request.approved
+
+    def _serve_pending_approval(self) -> bool:
+        """Render one queued approval from the CLI event-loop thread."""
+        try:
+            request = self._approval_requests.get_nowait()
+        except queue.Empty:
+            return False
+        try:
+            request.approved = bool(self.ui.confirm(request.kind, request.detail))
+        finally:
+            request.done.set()
+        return True
 
     def _refresh_git_state(self) -> None:
         self.git_branch = self._git_branch(self.project)
@@ -277,14 +319,14 @@ class AdvertpreneurCLI:
         self.plugin_manager = PluginManager(APP_DIR, self.project)
         self.mcp_manager = MCPManager(
             APP_DIR,
-            approve=self.ui.confirm if hasattr(self, "ui") else (lambda _k, _d: False),
+            approve=self._request_approval if hasattr(self, "ui") else (lambda _k, _d: False),
             approval_mode=self.settings.approval_mode,
         )
         self.tools = ToolRegistry(
             self.project,
             self.settings.approval_mode,
             self.settings.max_tool_output_chars,
-            approve=self.ui.confirm if hasattr(self, "ui") else (lambda _k, _d: False),
+            approve=self._request_approval if hasattr(self, "ui") else (lambda _k, _d: False),
             plugin_manager=self.plugin_manager,
             mcp_manager=self.mcp_manager,
             project_index=self.project_index,
@@ -4131,6 +4173,9 @@ class AdvertpreneurCLI:
                     raw = self.ui.prompt()
                 except EOFError:
                     raw = ""
+                if raw == _APPROVAL_WAKE:
+                    self._serve_pending_approval()
+                    continue
                 immediate = raw.startswith("\x00ADP_IMMEDIATE\x00")
                 raw = raw.removeprefix("\x00ADP_IMMEDIATE\x00").strip()
                 if raw:
@@ -4156,6 +4201,9 @@ class AdvertpreneurCLI:
             if not raw:
                 continue
             try:
+                if raw == _APPROVAL_WAKE:
+                    self._serve_pending_approval()
+                    continue
                 if raw.startswith("/"):
                     if not self.command(raw):
                         self._bridge_unregister_current()

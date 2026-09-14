@@ -62,7 +62,7 @@ class ExternalActionGateway:
             "for example ```adp_action {\"tool\":\"browser\",\"args\":{\"action\":\"status\"}} ``` . "
             "ADP executes the action and returns observed evidence in `adp_action_result`; inspect it before requesting one next action or finishing. "
             "Use browser actions yourself for live panels. Never ask for credentials: if the result says `Login needed in browser`, stop and wait. "
-            "For Amazon/Helium 10 keyword research, create one local run with browser `research_start`, verify the first search/export through `research_search` and `research_export`, then use `research_run` to process the saved-selector queue one keyword at a time. "
+            "For Amazon/Helium 10 keyword research, use browser tab slots: `access` for Softzilla, capture Launch Web App into `helium`, and keep searches in `amazon`. Before the first keyword, inspect Amazon's delivery location and, only when it is not New York ZIP 10001, use the observed page controls to set and confirm 10001. In the observed Xray modal, use Load more until the data is present; if it has not populated after 30 seconds, use that modal's observed refresh control once, then export CSV. Create one local run with browser `research_start`, verify the first search/export through `research_search` and `research_export`, then use `research_run` to process the saved-selector queue one keyword at a time. "
             "If ADP reports a sign-in, MFA, CAPTCHA, traffic, access, rate, or verification checkpoint, stop immediately and wait; never attempt to bypass it. "
             "Never delete or remove content directly; request a deletion proposal and stop until its explicit approval is returned. "
             + worker_ownership_contract()

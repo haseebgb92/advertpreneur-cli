@@ -600,6 +600,25 @@ class TerminalUI:
         except Exception:
             pass
 
+    def interrupt_prompt(self, result: str) -> bool:
+        """Return the active composer to the CLI loop without touching it cross-thread.
+
+        Task workers use this only to request a main-thread interaction, such as a
+        destructive-operation approval.  Prompt Toolkit owns the terminal loop, so
+        the worker schedules ``exit`` on that loop instead of calling ``prompt``.
+        """
+        if not getattr(self, "_prompt_active", False):
+            return False
+        try:
+            app = self.session.app
+            loop = app.loop
+            if loop is None:
+                return False
+            loop.call_soon_threadsafe(lambda: app.exit(result=result))
+            return True
+        except Exception:
+            return False
+
     def _live_refresh_worker(self) -> None:
         """Request a prompt-toolkit repaint at 5 FPS without touching stdout."""
         while not self._live_stop.wait(0.2):

@@ -3,6 +3,7 @@
 const BRIDGE = "http://127.0.0.1:8765";
 const PROVIDER_KEY = "adpBrowserProvider";
 const TAB_KEY = "adpBrowserControlledTab";
+const TAB_SLOTS_KEY = "adpBrowserControlledTabs";
 const LEARN_KEY = "adpBrowserLearnActive";
 let browserLoopRunning = false;
 
@@ -128,23 +129,56 @@ async function wordpressState(tabId) {
   });
 }
 
-async function existingControlledTab() {
-  const saved = await storageGet(TAB_KEY, null);
+function slotName(value) {
+  const clean = String(value || "work").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").slice(0, 32);
+  return clean || "work";
+}
+
+async function controlledTabs() {
+  const slots = await storageGet(TAB_SLOTS_KEY, {});
+  if (slots && typeof slots === "object") return slots;
+  const legacy = await storageGet(TAB_KEY, null);
+  return legacy?.tabId ? { work: legacy } : {};
+}
+
+async function saveControlledTab(slot, tab) {
+  const slots = await controlledTabs();
+  slots[slotName(slot)] = { tabId: tab.id, windowId: tab.windowId };
+  await storageSet(TAB_SLOTS_KEY, slots);
+  await storageSet(TAB_KEY, slots.work || slots[slotName(slot)] || null);
+}
+
+async function existingControlledTab(slot = "work") {
+  const slots = await controlledTabs();
+  const saved = slots[slotName(slot)];
   if (!saved?.tabId) return null;
   try {
     return await chrome.tabs.get(Number(saved.tabId));
   } catch (_) {
-    await storageSet(TAB_KEY, null);
+    delete slots[slotName(slot)];
+    await storageSet(TAB_SLOTS_KEY, slots);
+    if (slotName(slot) === "work") await storageSet(TAB_KEY, null);
     return null;
   }
 }
 
-async function ensureControlledTab(url = "about:blank") {
-  let tab = await existingControlledTab();
+async function ensureControlledTab(url = "about:blank", slot = "work") {
+  let tab = await existingControlledTab(slot);
   if (tab) return tab;
   tab = await chrome.tabs.create({ url, active: true });
-  await storageSet(TAB_KEY, { tabId: tab.id, windowId: tab.windowId });
+  await saveControlledTab(slot, tab);
   return tab;
+}
+
+async function captureSpawnedTab(slot, existingIds, windowId, timeoutMs = 8000) {
+  const deadline = Date.now() + Math.max(1000, Math.min(15000, Number(timeoutMs || 8000)));
+  while (Date.now() < deadline) {
+    const tabs = await chrome.tabs.query({ windowId });
+    const tab = tabs.find((row) => row.id && !existingIds.has(row.id));
+    if (tab) { await saveControlledTab(slot, tab); return tab; }
+    await sleep(150);
+  }
+  return null;
 }
 
 function waitTab(tabId, timeoutMs = 30000) {
@@ -282,24 +316,26 @@ function snapshotFunction(selector, maxElements) {
 
 async function browserCommand(command) {
   const action = String(command.action || "status"); const args = command.args || {};
+  const slot = slotName(args.tab);
   if (action === "status") {
-    const current = await existingControlledTab();
+    const current = await existingControlledTab(slot);
+    const slots = await controlledTabs();
     if (current?.id) await setControlBar(current.id, "Advertpreneur is controlling this tab", "active");
-    return { provider: "existing-edge/extension", running: Boolean(current), tab_id: current?.id || 0, url: current?.url || "", title: current?.title || "" };
+    return { provider: "existing-edge/extension", running: Boolean(current), tab: slot, tabs: Object.keys(slots), tab_id: current?.id || 0, url: current?.url || "", title: current?.title || "" };
   }
   if (action === "learn_start") {
-    const tab = await ensureControlledTab();
+    const tab = await ensureControlledTab("about:blank", slot);
     await storageSet(LEARN_KEY, { active: true, name: String(args.name || "routine"), tabId: tab.id, startedAt: Date.now() });
     await setControlBar(tab.id, `Advertpreneur Learn Mode · ${String(args.name || "routine")}`, "working");
     return { provider: "existing-edge/extension", learning: true, tab_id: tab.id, url: tab.url || "", title: tab.title || "", verified: true };
   }
   if (action === "learn_stop") {
-    const tab = await existingControlledTab();
+    const tab = await existingControlledTab(slot);
     await storageSet(LEARN_KEY, null);
     if (tab?.id) await setControlBar(tab.id, "Advertpreneur is controlling this tab", "active");
     return { provider: "existing-edge/extension", learning: false, tab_id: tab?.id || 0, url: tab?.url || "", title: tab?.title || "", verified: true };
   }
-  let tab = await ensureControlledTab();
+  let tab = await ensureControlledTab("about:blank", slot);
   if (action === "download_mark") {
     const marker = await newestDownloadId();
     return {provider:"existing-edge/extension", marker, verified:true};
@@ -335,7 +371,7 @@ async function browserCommand(command) {
   if (action === "navigate") {
     const url = String(args.url || ""); if (!/^https?:\/\//i.test(url)) throw new Error("navigate requires an http/https URL");
     await setControlBar(tab.id, "Advertpreneur · navigating", "working");
-    tab = await chrome.tabs.update(tab.id, { url, active: true }); tab = await waitTab(tab.id, Number(args.timeout_ms || 30000));
+    tab = await chrome.tabs.update(tab.id, { url, active: true }); tab = await waitTab(tab.id, Number(args.timeout_ms || 30000)); await saveControlledTab(slot, tab);
     if (tab?.id) await setControlBar(tab.id, "Advertpreneur is controlling this tab", "active");
     await reportProgress("navigated", "Navigation verified", tab); return { provider: "existing-edge/extension", url: tab?.url || url, title: tab?.title || "", tab_id: tab?.id || 0, verified: true };
   }
@@ -356,7 +392,7 @@ async function browserCommand(command) {
     return { provider: "existing-edge/extension", url: tab.url || "", title: tab.title || "", data_url: dataUrl, format: "jpeg", viewport_only: true, selector, verified: true };
   }
   if (action === "click") {
-    const selector = String(args.selector || ""); const beforeUrl = tab.url || ""; await setControlBar(tab.id, "Advertpreneur · clicking", "working");
+    const selector = String(args.selector || ""); const beforeUrl = tab.url || ""; const beforeIds = new Set((await chrome.tabs.query({})).map((row) => row.id)); await setControlBar(tab.id, "Advertpreneur · clicking", "working");
     const result = await executeInTab(tab.id, (sel) => {
       const el=document.querySelector(sel); if(!el)return{error:`Selector not found: ${sel}`};
       const anchor=el.closest("a") || (el.tagName === "A" ? el : null); const target=anchor?.href || "";
@@ -367,7 +403,8 @@ async function browserCommand(command) {
     const expectsNav=Boolean(result?.target && !String(result.target).toLowerCase().startsWith("javascript:")); const deadline=Date.now()+Number(args.verify_ms||5000); let current=await chrome.tabs.get(tab.id);
     while(expectsNav && current?.url===beforeUrl && Date.now()<deadline){await sleep(180); current=await chrome.tabs.get(tab.id);}
     await setControlBar(tab.id, "Advertpreneur is controlling this tab", "active");
-    return {provider:"existing-edge/extension",clicked:selector,before_url:beforeUrl,url:current?.url||beforeUrl,title:current?.title||"",target:result?.target||"",element_text:result?.element_text||"",navigated:Boolean((current?.url||beforeUrl)!==beforeUrl),verified:true};
+    const captured = args.capture_tab ? await captureSpawnedTab(args.capture_tab, beforeIds, tab.windowId, args.capture_timeout_ms) : null;
+    return {provider:"existing-edge/extension",tab:slot,captured_tab:captured ? slotName(args.capture_tab) : "",captured_tab_id:captured?.id || 0,clicked:selector,before_url:beforeUrl,url:current?.url||beforeUrl,title:current?.title||"",target:result?.target||"",element_text:result?.element_text||"",navigated:Boolean((current?.url||beforeUrl)!==beforeUrl),verified:true};
   }
   if (action === "fill") {
     const selector=String(args.selector||""); const value=String(args.value||""); await setControlBar(tab.id,"Advertpreneur · filling field","working");
@@ -383,7 +420,7 @@ async function browserCommand(command) {
   if (action === "wait") {
     const ms=Math.max(0,Math.min(30000,Number(args.milliseconds||750))); await setControlBar(tab.id,`Advertpreneur · waiting ${ms}ms`,"working"); await sleep(ms); const current=await chrome.tabs.get(tab.id); await setControlBar(tab.id,"Advertpreneur is controlling this tab","active"); return {provider:"existing-edge/extension",url:current?.url||"",title:current?.title||"",verified:true,milliseconds:ms};
   }
-  if (action === "close") { try{await chrome.tabs.remove(tab.id);}catch(_){} await storageSet(TAB_KEY,null); return {provider:"existing-edge/extension",closed:true,verified:true}; }
+  if (action === "close") { try{await chrome.tabs.remove(tab.id);}catch(_){} const slots=await controlledTabs(); delete slots[slot]; await storageSet(TAB_SLOTS_KEY,slots); if(slot==="work")await storageSet(TAB_KEY,null); return {provider:"existing-edge/extension",closed:true,tab:slot,verified:true}; }
   throw new Error(`Unsupported browser action: ${action}`);
 }
 

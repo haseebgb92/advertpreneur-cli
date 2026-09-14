@@ -372,12 +372,14 @@ class BrowserController:
         status = response.status if response else "?"
         return f"Navigated · HTTP {status} · {self.current_title} · {self.current_url} · provider {self.provider}"
 
-    def navigate(self, url: str, wait_until: str = "domcontentloaded") -> str:
+    def navigate(self, url: str, wait_until: str = "domcontentloaded", tab: str = "work") -> str:
         url = self._normalize_url(url)
         if self._extension_available(wait_seconds=2.5):
-            row = self._extension_call("navigate", timeout=45, url=url, wait_until=wait_until, timeout_ms=35000)
-            self.routines.record("navigate", {"url": url, "wait_until": wait_until}, row)
+            row = self._extension_call("navigate", timeout=45, url=url, wait_until=wait_until, timeout_ms=35000, tab=tab)
+            self.routines.record("navigate", {"url": url, "wait_until": wait_until, "tab": tab}, row)
             return self._extension_summary(row, "navigate")
+        if tab != "work":
+            raise BrowserUnavailable("Named browser tabs require the connected Advertpreneur Browser Bridge extension")
         result = str(self._rpc("navigate", url, wait_until, timeout=60))
         self.routines.record("navigate", {"url": url, "wait_until": wait_until}, {"url": self.current_url, "verified": True})
         return result
@@ -469,10 +471,12 @@ class BrowserController:
             )
         return "\n".join(lines)
 
-    def inspect(self, selector: str = "body", max_elements: int = 60) -> str:
+    def inspect(self, selector: str = "body", max_elements: int = 60, tab: str = "work") -> str:
         if self._extension_available(wait_seconds=0.8):
-            row = self._extension_call("inspect", timeout=25, selector=selector, max_elements=max_elements)
+            row = self._extension_call("inspect", timeout=25, selector=selector, max_elements=max_elements, tab=tab)
             return json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+        if tab != "work":
+            raise BrowserUnavailable("Named browser tabs require the connected Advertpreneur Browser Bridge extension")
         return str(self._rpc("inspect", selector, max_elements, timeout=35))
 
     def _click_direct(self, selector: str) -> str:
@@ -482,15 +486,17 @@ class BrowserController:
         self._update_page_state(page)
         return f"Clicked {selector!r} · {self.current_url}"
 
-    def click(self, selector: str) -> str:
+    def click(self, selector: str, tab: str = "work", capture_tab: str = "") -> str:
         if self._extension_available(wait_seconds=0.5):
-            row = self._extension_call("click", timeout=25, selector=selector, verify_ms=8000)
-            self.routines.record("click", {"selector": selector}, row)
+            row = self._extension_call("click", timeout=25, selector=selector, verify_ms=8000, tab=tab, capture_tab=capture_tab)
+            self.routines.record("click", {"selector": selector, "tab": tab}, row)
             outcome = "navigation verified" if row.get("navigated") else "click verified"
             return (
                 f"Clicked {selector!r} · {outcome} · existing-edge/extension · "
                 f"{row.get('url') or self.current_url}"
             )
+        if tab != "work":
+            raise BrowserUnavailable("Named browser tabs require the connected Advertpreneur Browser Bridge extension")
         before = self.current_url
         result = str(self._rpc("click", selector, timeout=25))
         self.routines.record("click", {"selector": selector}, {"before_url": before, "url": self.current_url, "verified": True, "navigated": before != self.current_url})
@@ -502,11 +508,13 @@ class BrowserController:
         self._update_page_state(page)
         return f"Filled {selector!r} ({len(str(value))} chars)."
 
-    def fill(self, selector: str, value: str) -> str:
+    def fill(self, selector: str, value: str, tab: str = "work") -> str:
         if self._extension_available(wait_seconds=0.5):
-            row = self._extension_call("fill", timeout=20, selector=selector, value=str(value))
-            self.routines.record("fill", {"selector": selector, "value": str(value)}, row)
+            row = self._extension_call("fill", timeout=20, selector=selector, value=str(value), tab=tab)
+            self.routines.record("fill", {"selector": selector, "value": str(value), "tab": tab}, row)
             return f"Filled {selector!r} ({len(str(value))} chars) · existing-edge/extension"
+        if tab != "work":
+            raise BrowserUnavailable("Named browser tabs require the connected Advertpreneur Browser Bridge extension")
         result = str(self._rpc("fill", selector, value, timeout=25))
         self.routines.record("fill", {"selector": selector, "value": str(value)}, {"verified": True, "url": self.current_url})
         return result
@@ -522,11 +530,13 @@ class BrowserController:
         y = int(page.evaluate("window.scrollY"))
         return f"Scrolled · y={y} · {self.current_url}"
 
-    def scroll(self, amount: int | str = 650) -> str:
+    def scroll(self, amount: int | str = 650, tab: str = "work") -> str:
         if self._extension_available(wait_seconds=0.5):
-            row = self._extension_call("scroll", timeout=20, amount=amount)
-            self.routines.record("scroll", {"amount": amount}, row)
+            row = self._extension_call("scroll", timeout=20, amount=amount, tab=tab)
+            self.routines.record("scroll", {"amount": amount, "tab": tab}, row)
             return f"Scrolled · y={row.get('scroll_y', '?')} · existing-edge/extension · {row.get('url') or self.current_url}"
+        if tab != "work":
+            raise BrowserUnavailable("Named browser tabs require the connected Advertpreneur Browser Bridge extension")
         result = str(self._rpc("scroll", amount, timeout=25))
         self.routines.record("scroll", {"amount": amount}, {"verified": True, "url": self.current_url})
         return result
@@ -538,17 +548,19 @@ class BrowserController:
         self._update_page_state(page)
         return f"Waited {ms}ms · {self.current_url}"
 
-    def wait(self, milliseconds: int = 750) -> str:
+    def wait(self, milliseconds: int = 750, tab: str = "work") -> str:
         ms = max(0, min(30000, int(milliseconds)))
         if self._extension_available(wait_seconds=0.5):
-            row = self._extension_call("wait", timeout=max(20, ms / 1000 + 5), milliseconds=ms)
-            self.routines.record("wait", {"milliseconds": ms}, row)
+            row = self._extension_call("wait", timeout=max(20, ms / 1000 + 5), milliseconds=ms, tab=tab)
+            self.routines.record("wait", {"milliseconds": ms, "tab": tab}, row)
             return f"Waited {ms}ms · existing-edge/extension · {row.get('url') or self.current_url}"
+        if tab != "work":
+            raise BrowserUnavailable("Named browser tabs require the connected Advertpreneur Browser Bridge extension")
         result = str(self._rpc("wait", ms, timeout=max(25, ms / 1000 + 5)))
         self.routines.record("wait", {"milliseconds": ms}, {"verified": True, "url": self.current_url})
         return result
 
-    def mark_download(self) -> int:
+    def mark_download(self, tab: str = "work") -> int:
         """Capture the newest download id before a visible export click.
 
         Download observation is only available through the connected Browser Bridge;
@@ -556,14 +568,14 @@ class BrowserController:
         """
         if not self._extension_available(wait_seconds=0.8):
             raise BrowserUnavailable("Research downloads require the connected Advertpreneur Browser Bridge extension")
-        row = self._extension_call("download_mark", timeout=12)
+        row = self._extension_call("download_mark", timeout=12, tab=tab)
         return int(row.get("marker") or row.get("download_id") or 0)
 
-    def wait_for_download(self, marker: int, timeout_seconds: int = 45) -> Path:
+    def wait_for_download(self, marker: int, timeout_seconds: int = 45, tab: str = "work") -> Path:
         if not self._extension_available(wait_seconds=0.8):
             raise BrowserUnavailable("Research downloads require the connected Advertpreneur Browser Bridge extension")
         timeout_ms = max(1_000, min(120_000, int(timeout_seconds) * 1000))
-        row = self._extension_call("download_wait", timeout=(timeout_ms / 1000) + 12, marker=int(marker), timeout_ms=timeout_ms)
+        row = self._extension_call("download_wait", timeout=(timeout_ms / 1000) + 12, marker=int(marker), timeout_ms=timeout_ms, tab=tab)
         filename = str(row.get("filename") or "")
         if not filename:
             raise BrowserUnavailable("Browser Bridge completed a download without a local filename")
