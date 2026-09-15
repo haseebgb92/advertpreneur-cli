@@ -14,7 +14,7 @@
 
 **Files:**
 - Modify: `advertpreneur_cli/browser_learning.py:14-147`
-- Test: `tests/test_browser_learning.py`
+- Test: `tests/test_v0141_learn_quota_status.py`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -47,7 +47,7 @@ def test_teach_routine_omits_non_search_fill_values(tmp_path):
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `python -m pytest tests\\test_browser_learning.py::test_teach_routine_persists_protected_tabs_and_hides_keyword_value tests\\test_browser_learning.py::test_teach_routine_omits_non_search_fill_values -q`
+Run: `python -m pytest tests\\test_v0141_learn_quota_status.py::test_teach_routine_persists_protected_tabs_and_hides_keyword_value tests\\test_v0141_learn_quota_status.py::test_teach_routine_omits_non_search_fill_values -q`
 
 Expected: FAIL because `start()` does not accept `protected_tabs` and raw field values are still recorded.
 
@@ -76,14 +76,14 @@ def stop(self) -> Dict[str, Any]:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `python -m pytest tests\\test_browser_learning.py::test_teach_routine_persists_protected_tabs_and_hides_keyword_value tests\\test_browser_learning.py::test_teach_routine_omits_non_search_fill_values -q`
+Run: `python -m pytest tests\\test_v0141_learn_quota_status.py::test_teach_routine_persists_protected_tabs_and_hides_keyword_value tests\\test_v0141_learn_quota_status.py::test_teach_routine_omits_non_search_fill_values -q`
 
 Expected: `2 passed`.
 
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add advertpreneur_cli/browser_learning.py tests/test_browser_learning.py
+git add advertpreneur_cli/browser_learning.py tests/test_v0141_learn_quota_status.py
 git commit -m "feat(browser): persist safe taught workflow maps"
 ```
 
@@ -155,7 +155,7 @@ git commit -m "feat(browser): teach across protected named tabs"
 - Modify: `advertpreneur_cli/tui.py:90-160`
 - Modify: `advertpreneur_cli/cli.py:2491-2664`
 - Test: `tests/test_codex_comfort.py`
-- Test: `tests/test_browser_learning.py`
+- Test: `tests/test_v0141_learn_quota_status.py`
 
 - [ ] **Step 1: Write failing command/review tests**
 
@@ -176,7 +176,7 @@ def test_taught_workflow_review_lists_tabs_and_numbered_steps(tmp_path):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest tests\\test_codex_comfort.py::test_teach_command_is_available_in_the_command_palette tests\\test_browser_learning.py::test_taught_workflow_review_lists_tabs_and_numbered_steps -q`
+Run: `python -m pytest tests\\test_codex_comfort.py::test_teach_command_is_available_in_the_command_palette tests\\test_v0141_learn_quota_status.py::test_taught_workflow_review_lists_tabs_and_numbered_steps -q`
 
 Expected: FAIL because `/teach` and `stop_review()` do not exist.
 
@@ -210,14 +210,14 @@ def teach_command(self, arg: str | None = None) -> None:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `python -m pytest tests\\test_codex_comfort.py::test_teach_command_is_available_in_the_command_palette tests\\test_browser_learning.py::test_taught_workflow_review_lists_tabs_and_numbered_steps -q`
+Run: `python -m pytest tests\\test_codex_comfort.py::test_teach_command_is_available_in_the_command_palette tests\\test_v0141_learn_quota_status.py::test_taught_workflow_review_lists_tabs_and_numbered_steps -q`
 
 Expected: `2 passed`.
 
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add advertpreneur_cli/tui.py advertpreneur_cli/cli.py advertpreneur_cli/browser_learning.py tests/test_codex_comfort.py tests/test_browser_learning.py
+git add advertpreneur_cli/tui.py advertpreneur_cli/cli.py advertpreneur_cli/browser_learning.py tests/test_codex_comfort.py tests/test_v0141_learn_quota_status.py
 git commit -m "feat(cli): expose teach workflow review"
 ```
 
@@ -301,7 +301,7 @@ git commit -m "feat(browser): replay taught workflows with guarded parameters"
 
 - [ ] **Step 1: Run the focused regression suite**
 
-Run: `python -m pytest tests\\test_browser_learning.py tests\\test_v013_harness.py tests\\test_action_gateway.py tests\\test_research_workflow.py tests\\test_xray_workflow.py tests\\test_codex_comfort.py -q`
+Run: `python -m pytest tests\\test_v0141_learn_quota_status.py tests\\test_v013_harness.py tests\\test_action_gateway.py tests\\test_research_workflow.py tests\\test_xray_workflow.py tests\\test_codex_comfort.py -q`
 
 Expected: all selected tests pass. Do not run the session-ending full `pytest -q` command.
 

@@ -30,6 +30,29 @@ def test_learning_state_survives_controller_rebind(tmp_path: Path):
     assert not (browser_dir / ".learning-active.json").exists()
 
 
+def test_teach_routine_persists_protected_tabs_and_hides_keyword_value(tmp_path: Path):
+    store = BrowserRoutineStore(tmp_path)
+    store.start("amazon-xray", protected_tabs={
+        "access": {"url": "https://members.softzilla.net/member", "title": "Members"},
+        "helium": {"url": "https://app.helium10.com", "title": "Helium"},
+        "amazon": {"url": "https://amazon.com", "title": "Amazon"},
+    })
+    store.record("fill", {"selector": "#twotabsearchtextbox", "value": "bee wax wrap", "tab": "amazon"}, {"url": "https://amazon.com"})
+    row = store.stop()
+
+    assert sorted(row["protected_tabs"]) == ["access", "amazon", "helium"]
+    assert row["steps"][0]["args"]["value"] == "[TEACH_KEYWORD]"
+    assert "bee wax wrap" not in str(row)
+
+
+def test_teach_routine_omits_non_search_fill_values(tmp_path: Path):
+    store = BrowserRoutineStore(tmp_path)
+    store.start("portal", protected_tabs={"access": {"url": "https://example.test", "title": "Portal"}})
+    store.record("fill", {"selector": "#notes", "value": "private note", "tab": "access"}, {})
+
+    assert store.stop()["steps"] == []
+
+
 def test_broker_buffers_human_browser_learning_events(tmp_path: Path):
     state = BrokerState(tmp_path / "pairs.json")
     reg = state.browser_register({"provider_id": "edge1", "token": "secret", "label": "Edge"})
