@@ -596,7 +596,7 @@ class ToolRegistry:
     def tool_browser(
         self, action: str, url: str = "", selector: str = "", name: str = "design-map", tab: str = "work", capture_tab: str = "",
         value: str = "", amount: int | str = 650, milliseconds: int = 750, repeat: int = 1,
-        max_elements: int = 120, full_page: bool = True, file_path: str = "", proposal_id: str = "", approval_token: str = "",
+        max_elements: int = 24, full_page: bool = True, file_path: str = "", proposal_id: str = "", approval_token: str = "",
     ) -> str:
         action = str(action or "").strip().lower()
         try:

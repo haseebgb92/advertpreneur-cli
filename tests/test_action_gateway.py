@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from advertpreneur_cli.cli import AdvertpreneurCLI
 from advertpreneur_cli.provider_harness import ProviderRun
-from advertpreneur_cli.tools import ToolError
+from advertpreneur_cli.tools import ToolError, ToolRegistry
 
 
 class FakeTools:
@@ -135,12 +135,40 @@ def test_gateway_recovers_once_when_provider_turn_is_blank():
     assert tools.calls == [("browser", {"action": "status"})]
 
 
+def test_cli_rollover_discards_the_warm_provider_helper_as_well_as_thread_id():
+    cli = object.__new__(AdvertpreneurCLI)
+    cli.current_session = SimpleNamespace(provider_threads={"agy": "bloated-thread"})
+    released = []
+    cli.provider_harness = SimpleNamespace(release_warm_sessions=lambda: released.append(True) or 1)
+
+    cli._rollover_provider_thread("agy")
+
+    assert cli.current_session.provider_threads == {}
+    assert released == [True]
+
+
+def test_browser_inspect_uses_a_compact_default_observation(tmp_path):
+    observed = []
+
+    class Browser:
+        def inspect(self, _selector, max_elements, **kwargs):
+            observed.append((max_elements, kwargs))
+            return "{}"
+
+    tools = ToolRegistry(tmp_path)
+    tools.browser_controller = Browser()
+
+    assert tools.tool_browser("inspect", tab="access") == "{}"
+    assert observed == [(24, {"tab": "access"})]
+
+
 def test_gateway_contract_requires_verified_results_and_preserves_login_delete_boundaries():
     from advertpreneur_cli.action_gateway import ExternalActionGateway
 
     contract = ExternalActionGateway.contract()
     assert "adp_action" in contract
     assert "Login needed in browser" in contract
+    assert "saved browser session" in contract
     assert "deletion proposal" in contract
 
 

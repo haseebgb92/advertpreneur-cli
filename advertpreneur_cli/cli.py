@@ -64,7 +64,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.28.10"
+VERSION = "0.28.11"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -3138,6 +3138,11 @@ class AdvertpreneurCLI:
         context_input = int(getattr(run, "context_input_tokens", run.input_tokens) or 0)
         return context_input >= 220_000 or run.uncached_input_tokens >= 90_000
 
+    def _rollover_provider_thread(self, provider: str) -> None:
+        """Discard both the saved ID and any warm process behind a bloated turn."""
+        self.current_session.provider_threads.pop(str(provider or ""), None)
+        self.provider_harness.release_warm_sessions()
+
     @staticmethod
     def _micro_coding_task(task_text: str) -> bool:
         """Conservative zero-model classifier for cheap, self-contained tasks."""
@@ -3361,7 +3366,7 @@ class AdvertpreneurCLI:
         if self._provider_thread_should_rollover(run):
             # Keep this task's result, but start the *next* task on a clean native
             # provider thread to avoid runaway context/input growth.
-            self.current_session.provider_threads.pop(provider, None)
+            self._rollover_provider_thread(provider)
             self.ui.muted(
                 f"{provider.upper()} context guard · next task will start a fresh provider thread "
                 f"({run.context_input_tokens:,} context input / {run.uncached_input_tokens:,} new input this turn)"
