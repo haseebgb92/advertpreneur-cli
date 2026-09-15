@@ -36,6 +36,14 @@ def test_browser_controller_constructor_initializes_bridge_and_state_fields(tmp_
     assert ctl.provider == "idle"
 
 
+def test_extension_status_labels_successful_status_command_connected(tmp_path: Path, monkeypatch):
+    controller = BrowserController(tmp_path)
+    monkeypatch.setattr(controller, "_extension_available", lambda **_kwargs: True)
+    monkeypatch.setattr(controller, "_extension_call", lambda *_args, **_kwargs: {"provider": "existing-edge/extension"})
+
+    assert "connected" in controller.status().lower()
+
+
 def test_existing_edge_extension_is_preferred_for_navigation(tmp_path: Path):
     ctl = BrowserController(tmp_path, visible=True)
     ctl._extension_available = lambda wait_seconds=0.0: True

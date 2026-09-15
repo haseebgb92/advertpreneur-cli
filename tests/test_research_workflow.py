@@ -285,3 +285,89 @@ def test_xray_setup_requires_and_persists_observed_selectors(tmp_path: Path):
     payload = '{"search":"#search","submit":"#submit","open":"#open","rows":"[data-asin]","load_more":"#more","refresh":"#refresh","export":"#export","csv":"#csv"}'
     assert "Xray selectors saved" in tools.tool_browser("research_xray_setup", name="Xray Run", value=payload)
     assert tools._research_run("Xray Run").xray_selectors()["rows"] == "[data-asin]"
+
+
+def test_xray_runner_observes_growth_then_exports_csv_in_amazon_tab(tmp_path: Path):
+    source = tmp_path / "downloads" / "xray.csv"
+    source.parent.mkdir()
+    source.write_text("xray", encoding="utf-8")
+    calls = []
+
+    class Browser:
+        current_url = "https://www.amazon.com/s"
+
+        def __init__(self):
+            self.row_counts = iter((20, 40, 40))
+            self.more_visible = iter((True, True, False))
+
+        def _extension_available(self, **_kwargs): return True
+        def inspect(self, *_args, **kwargs): calls.append(("inspect", kwargs)); return '{"title":"Amazon","url":"https://www.amazon.com/s"}'
+        def fill(self, *_args, **kwargs): calls.append(("fill", kwargs)); return "filled"
+        def click(self, selector, **kwargs): calls.append(("click", {"selector": selector, **kwargs})); return "clicked"
+        def wait(self, *_args, **kwargs): calls.append(("wait", kwargs)); return "waited"
+        def selector_state(self, selector, **kwargs):
+            calls.append(("selector_state", {"selector": selector, **kwargs}))
+            if selector == "[data-asin]":
+                return {"count": next(self.row_counts), "visible": True}
+            return {"count": 1, "visible": next(self.more_visible)}
+        def mark_download(self, **kwargs): calls.append(("mark_download", kwargs)); return 3
+        def wait_for_download(self, *_args, **kwargs): calls.append(("wait_for_download", kwargs)); return source
+        def navigate(self, *_args, **kwargs): calls.append(("navigate", kwargs)); return "refreshed"
+
+    tools = ToolRegistry(tmp_path, approval_mode="safe")
+    tools.browser_controller = Browser()
+    tools.tool_browser("research_start", name="Xray Run", value="silicone baking mat")
+    payload = '{"search":"#search","submit":"#submit","open":"#open","rows":"[data-asin]","load_more":"#more","refresh":"#refresh","export":"#export","csv":"#csv"}'
+    tools.tool_browser("research_xray_setup", name="Xray Run", value=payload)
+
+    result = tools.tool_browser("research_run", name="Xray Run", milliseconds=250)
+
+    assert "1 completed" in result
+    assert [row[1]["selector"] for row in calls if row[0] == "click"] == ["#submit", "#open", "#more", "#more", "#export", "#csv"]
+    assert all(kwargs.get("tab") == "amazon" for _name, kwargs in calls)
+    assert ResearchRun.open(tmp_path, "Xray Run").status()["completed"] == ["silicone baking mat"]
+
+
+def test_xray_runner_records_no_data_after_one_observed_refresh(tmp_path: Path):
+    class Browser:
+        current_url = "https://www.amazon.com/s"
+        def _extension_available(self, **_kwargs): return True
+        def inspect(self, *_args, **_kwargs): return '{"title":"Amazon"}'
+        def fill(self, *_args, **_kwargs): return "filled"
+        def click(self, *_args, **_kwargs): return "clicked"
+        def wait(self, *_args, **_kwargs): return "waited"
+        def selector_state(self, selector, **_kwargs): return {"count": 0, "visible": selector != "[data-asin]"}
+        def navigate(self, *_args, **_kwargs): return "refreshed"
+
+    tools = ToolRegistry(tmp_path, approval_mode="safe")
+    tools.browser_controller = Browser()
+    tools.tool_browser("research_start", name="Xray Run", value="silicone baking mat")
+    payload = '{"search":"#search","submit":"#submit","open":"#open","rows":"[data-asin]","load_more":"#more","refresh":"#refresh","export":"#export","csv":"#csv"}'
+    tools.tool_browser("research_xray_setup", name="Xray Run", value=payload)
+
+    tools.tool_browser("research_run", name="Xray Run", milliseconds=250)
+
+    assert ResearchRun.open(tmp_path, "Xray Run").status()["no_data"] == ["silicone baking mat"]
+
+
+def test_xray_runner_records_missing_download(tmp_path: Path):
+    class Browser:
+        current_url = "https://www.amazon.com/s"
+        def _extension_available(self, **_kwargs): return True
+        def inspect(self, *_args, **_kwargs): return '{"title":"Amazon"}'
+        def fill(self, *_args, **_kwargs): return "filled"
+        def click(self, *_args, **_kwargs): return "clicked"
+        def wait(self, *_args, **_kwargs): return "waited"
+        def selector_state(self, selector, **_kwargs): return {"count": 1, "visible": selector == "[data-asin]"}
+        def mark_download(self, **_kwargs): return 1
+        def wait_for_download(self, *_args, **_kwargs): return tmp_path / "missing.csv"
+
+    tools = ToolRegistry(tmp_path, approval_mode="safe")
+    tools.browser_controller = Browser()
+    tools.tool_browser("research_start", name="Xray Run", value="silicone baking mat")
+    payload = '{"search":"#search","submit":"#submit","open":"#open","rows":"[data-asin]","load_more":"#more","refresh":"#refresh","export":"#export","csv":"#csv"}'
+    tools.tool_browser("research_xray_setup", name="Xray Run", value=payload)
+
+    tools.tool_browser("research_run", name="Xray Run", milliseconds=250)
+
+    assert ResearchRun.open(tmp_path, "Xray Run").status()["download_missing"] == ["silicone baking mat"]

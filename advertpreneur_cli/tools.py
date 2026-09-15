@@ -14,6 +14,7 @@ from .site_adapters import SiteAdapterRegistry, SiteAdapterError, SiteProfile
 from .operations import OperationLedger, ProjectIdentity
 from .panel_playbooks import PanelPlaybookRegistry, PlaybookError
 from .research_workflow import ResearchRun
+from .xray_workflow import XrayProgress, next_xray_action
 
 if TYPE_CHECKING:
     from .resource_guard import ResourceGuard
@@ -82,7 +83,7 @@ RESEARCH_SCHEMAS = [
 
 BROWSER_SCHEMAS = [
     tool_schema("browser", "Control the user's local browser. Prefer measured reverse-engineering over visual guessing. Browser actions must be verified by observable state. Learned routines replay deterministic browser steps without model rediscovery.", {
-        "action": {"type": "string", "enum": ["status", "operations_status", "navigate", "open", "site_detect", "site_profile", "site_playbook", "site_open", "site_upload", "inspect", "screenshot", "reverse_engineer", "click", "fill", "scroll", "wait", "upload", "wordpress_state", "workspace_list", "workspace_stage", "workspace_zip", "workspace_extract", "workspace_move", "wordpress_propose_delete", "wordpress_approve_delete", "wordpress_delete", "research_start", "research_status", "research_search", "research_export", "research_run", "research_pause", "research_resume", "run_routine", "routine_list", "close"]},
+        "action": {"type": "string", "enum": ["status", "operations_status", "navigate", "open", "site_detect", "site_profile", "site_playbook", "site_open", "site_upload", "inspect", "screenshot", "reverse_engineer", "click", "fill", "scroll", "wait", "upload", "wordpress_state", "workspace_list", "workspace_stage", "workspace_zip", "workspace_extract", "workspace_move", "wordpress_propose_delete", "wordpress_approve_delete", "wordpress_delete", "research_start", "research_xray_setup", "research_status", "research_search", "research_export", "research_run", "research_pause", "research_resume", "run_routine", "routine_list", "close"]},
         "url": {"type": "string"}, "selector": {"type": "string"}, "name": {"type": "string"}, "tab": {"type": "string", "description": "Named Browser Bridge tab slot, such as access, helium, or amazon"}, "capture_tab": {"type": "string", "description": "Save a new tab opened by click into this named slot"},
         "value": {"type": "string"}, "amount": {"type": ["integer", "string"]}, "milliseconds": {"type": "integer"}, "repeat": {"type": "integer"},
         "max_elements": {"type": "integer"}, "full_page": {"type": "boolean"}, "file_path": {"type": "string"}, "proposal_id": {"type": "string"}, "approval_token": {"type": "string"},
@@ -517,6 +518,81 @@ class ToolRegistry:
             raise ToolError("Research actions require a run name")
         return ResearchRun.open(self.root, name)
 
+    def _run_observed_xray(self, run: ResearchRun, known: dict[str, str], xray: dict[str, str], milliseconds: int) -> str:
+        """Process a selector-backed Xray queue without guessing page state."""
+        before = len(run.status()["completed"])
+        search_wait = max(10_000, min(15_000, int(milliseconds)))
+        while True:
+            active = run.status()["active"]
+            if active:
+                keyword = str(active[0])
+            else:
+                observed = self.browser_controller.inspect("body", max_elements=80, tab="amazon")
+                reason = self._research_pause_reason(observed)
+                if reason:
+                    return f"Research checkpoint · {reason} · {len(run.status()['completed']) - before} completed"
+                keyword = run.next_keyword()
+                if not keyword:
+                    status = run.status()
+                    return f"Research run complete · {len(status['completed']) - before} completed · {len(status['paused'])} paused"
+                try:
+                    self.browser_controller.fill(known["search"], keyword, tab="amazon")
+                    self.browser_controller.click(known["submit"], tab="amazon")
+                    self.browser_controller.wait(search_wait, tab="amazon")
+                    observed = self.browser_controller.inspect("body", max_elements=80, tab="amazon")
+                    reason = self._research_pause_reason(observed)
+                    if reason:
+                        run.record_outcome(keyword, "verification_required", reason, self.browser_controller.current_url)
+                        return f"Research checkpoint · {keyword} · {reason} · {len(run.status()['completed']) - before} completed"
+                except Exception as exc:
+                    run.record_outcome(keyword, "site_changed", f"search action failed: {exc}", self.browser_controller.current_url)
+                    continue
+
+            phase = "open Xray"
+            try:
+                self.browser_controller.click(xray["open"], tab="amazon")
+                self.browser_controller.wait(search_wait, tab="amazon")
+                progress = XrayProgress()
+                while True:
+                    observed = self.browser_controller.inspect("body", max_elements=80, tab="amazon")
+                    reason = self._research_pause_reason(observed)
+                    if reason:
+                        run.record_outcome(keyword, "verification_required", reason, self.browser_controller.current_url)
+                        return f"Research checkpoint · {keyword} · {reason} · {len(run.status()['completed']) - before} completed"
+                    rows = self.browser_controller.selector_state(xray["rows"], tab="amazon")
+                    more = self.browser_controller.selector_state(xray["load_more"], tab="amazon")
+                    action = next_xray_action(progress, int(rows.get("count") or 0), bool(more.get("visible")))
+                    if action == "load_more":
+                        phase = "load more"
+                        self.browser_controller.click(xray["load_more"], tab="amazon")
+                        self.browser_controller.wait(search_wait, tab="amazon")
+                        progress = XrayProgress(previous_rows=int(rows.get("count") or 0), refreshed=progress.refreshed)
+                        continue
+                    if action == "refresh":
+                        phase = "refresh Xray"
+                        self.browser_controller.click(xray["refresh"], tab="amazon")
+                        self.browser_controller.wait(search_wait, tab="amazon")
+                        progress = XrayProgress(previous_rows=int(rows.get("count") or 0), refreshed=True)
+                        continue
+                    if action == "no_data":
+                        run.record_outcome(keyword, "no_data", "Xray stayed empty or stalled after one refresh", self.browser_controller.current_url)
+                        self.browser_controller.navigate(self.browser_controller.current_url, tab="amazon")
+                        break
+                    phase = "download"
+                    marker = self.browser_controller.mark_download(tab="amazon")
+                    self.browser_controller.click(xray["export"], tab="amazon")
+                    self.browser_controller.wait(search_wait, tab="amazon")
+                    self.browser_controller.click(xray["csv"], tab="amazon")
+                    source = self.browser_controller.wait_for_download(marker, timeout_seconds=120, tab="amazon")
+                    run.complete_download(keyword, source, self.browser_controller.current_url)
+                    self.browser_controller.navigate(self.browser_controller.current_url, tab="amazon")
+                    break
+            except FileNotFoundError as exc:
+                run.record_outcome(keyword, "download_missing", str(exc), self.browser_controller.current_url)
+            except Exception as exc:
+                state = "download_missing" if phase == "download" else "site_changed"
+                run.record_outcome(keyword, state, f"{phase} failed: {exc}", self.browser_controller.current_url)
+
     def tool_browser(
         self, action: str, url: str = "", selector: str = "", name: str = "design-map", tab: str = "work", capture_tab: str = "",
         value: str = "", amount: int | str = 650, milliseconds: int = 750, repeat: int = 1,
@@ -700,6 +776,12 @@ class ToolRegistry:
                 missing = [label for label in ("search", "submit", "export") if not known.get(label)]
                 if missing:
                     raise ToolError("research_run needs successful observed selectors first: " + ", ".join(missing))
+                xray = run.xray_selectors()
+                if xray:
+                    missing_xray = [label for label in ("open", "rows", "load_more", "refresh", "export", "csv") if not xray.get(label)]
+                    if missing_xray:
+                        raise ToolError("research_run needs observed Xray selectors first: " + ", ".join(missing_xray))
+                    return self._run_observed_xray(run, known, xray, milliseconds)
                 before = len(run.status()["completed"])
                 while True:
                     active = run.status()["active"]

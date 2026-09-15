@@ -165,7 +165,7 @@ class BrowserController:
             state = str(progress.get("stage") or "ready")
             detail = str(progress.get("detail") or "")
             location = str(progress.get("url") or "")
-            return f"Browser bridge {'connected' if row.get('available') else 'offline'} · existing-edge/extension · {state} · {detail} · {location}".strip(" ·")
+            return f"Browser bridge {'connected' if row.get('available') is not False else 'offline'} · existing-edge/extension · {state} · {detail} · {location}".strip(" ·")
         if action == "navigate":
             return f"Navigated · existing Edge · {row.get('title') or ''} · {row.get('url') or ''}".strip(" ·")
         return json.dumps(row, ensure_ascii=False)
