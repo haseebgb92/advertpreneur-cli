@@ -218,3 +218,23 @@ def test_provider_packet_windows_cleanup_never_masks_completed_run(tmp_path: Pat
     run = h.run_packet("agy", "packet", "test", model="m")
     assert run.ok
     assert run.text == "ADP_AUTH_OK"
+
+
+def test_learn_start_arms_all_named_tabs_and_stop_preserves_event_tab(tmp_path: Path):
+    ctl = BrowserController(tmp_path, visible=True)
+    ctl._extension_available = lambda wait_seconds=0.0: True
+    calls = []
+    ctl.get_slots = lambda: {
+        "access": {"url": "https://members.softzilla.net/member", "title": "Members"},
+        "helium": {"url": "https://app.helium10.com", "title": "Helium"},
+        "amazon": {"url": "https://amazon.com", "title": "Amazon"},
+    }
+    ctl._extension_call = lambda action, **kwargs: calls.append((action, kwargs)) or {"url": "https://amazon.com", "title": "Amazon"}
+    ctl.bridge.browser_learn_events = lambda: [{"action": "click", "args": {"selector": "#analyze", "tab": "amazon"}, "evidence": {"url": "https://amazon.com"}}]
+
+    ctl.learn_start("amazon-xray")
+    summary = ctl.learn_stop()
+
+    assert calls[0] == ("learn_start", {"timeout": 10, "name": "amazon-xray", "tabs": ["access", "helium", "amazon"]})
+    assert "2 step" in summary
+    assert ctl.routines.get("amazon-xray")["steps"][-1]["args"]["tab"] == "amazon"

@@ -625,7 +625,8 @@ class BrowserController:
         return Path(filename)
 
     def learn_start(self, name: str) -> str:
-        actual = self.routines.start(name)
+        tabs = self.get_slots()
+        actual = self.routines.start(name, protected_tabs=tabs)
         # Clear any stale human events and arm the existing-browser recorder.
         try:
             self.bridge.browser_learn_events()
@@ -633,7 +634,7 @@ class BrowserController:
             pass
         if self._extension_available(wait_seconds=0.8):
             try:
-                row = self._extension_call("learn_start", timeout=10, name=actual)
+                row = self._extension_call("learn_start", timeout=10, name=actual, tabs=list(tabs))
                 current = str(row.get("url") or self.current_url or "")
                 if current.startswith(("http://", "https://")):
                     self.routines.record("navigate", {"url": current, "wait_until": "domcontentloaded"}, {"url": current, "verified": True})

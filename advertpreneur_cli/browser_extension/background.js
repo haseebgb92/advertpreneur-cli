@@ -335,8 +335,18 @@ async function browserCommand(command) {
     return {provider:"existing-edge/extension", verified:true, ...result};
   }
   if (action === "learn_start") {
-    const tab = await ensureControlledTab("about:blank", slot);
-    await storageSet(LEARN_KEY, { active: true, name: String(args.name || "routine"), tabId: tab.id, startedAt: Date.now() });
+    const requested = Array.isArray(args.tabs) && args.tabs.length ? args.tabs.map(slotName) : [slot];
+    const learnedTabs = {};
+    let tab = null;
+    for (const requestedSlot of requested) {
+      const candidate = await existingControlledTab(requestedSlot);
+      if (!candidate?.id) continue;
+      learnedTabs[String(candidate.id)] = requestedSlot;
+      if (!tab) tab = candidate;
+    }
+    if (!tab) tab = await ensureControlledTab("about:blank", slot);
+    learnedTabs[String(tab.id)] = slotName(await storageGet(TAB_KEY, slot));
+    await storageSet(LEARN_KEY, { active: true, name: String(args.name || "routine"), tabs: learnedTabs, startedAt: Date.now() });
     await setControlBar(tab.id, `Advertpreneur Learn Mode · ${String(args.name || "routine")}`, "working");
     return { provider: "existing-edge/extension", learning: true, tab_id: tab.id, url: tab.url || "", title: tab.title || "", verified: true };
   }
@@ -512,12 +522,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "ADP_BROWSER_LEARN_EVENT") {
     (async () => {
       const active = await storageGet(LEARN_KEY, null);
-      const controlled = await existingControlledTab();
-      if (!active?.active || !controlled?.id || Number(_sender?.tab?.id || 0) !== Number(controlled.id)) return;
+      const senderTabId = String(_sender?.tab?.id || "");
+      const learnedSlot = String(active?.tabs?.[senderTabId] || "");
+      if (!active?.active || !learnedSlot) return;
+      const event = message.event && typeof message.event === "object" ? {...message.event} : {};
+      event.args = event.args && typeof event.args === "object" ? {...event.args, tab: learnedSlot} : {tab: learnedSlot};
       const id = await providerIdentity();
       await bridgeFetch("/v1/browser/learn-event", {
         method: "POST",
-        body: { provider_id: id.providerId, token: id.token, event: message.event || {} },
+        body: { provider_id: id.providerId, token: id.token, event },
         timeoutMs: 3000
       });
     })().then(() => sendResponse({ ok: true })).catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
