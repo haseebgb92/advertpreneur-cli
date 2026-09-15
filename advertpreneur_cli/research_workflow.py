@@ -14,6 +14,8 @@ LEDGER_FIELDS = [
     "keyword", "state", "started_at", "completed_at", "report_path",
     "original_report_name", "browser_url", "detail",
 ]
+TERMINAL_STATES = {"completed", "no_data", "download_missing", "verification_required", "site_changed"}
+XRAY_SELECTOR_KEYS = ("open", "rows", "load_more", "refresh", "export", "csv")
 
 
 def _slug(value: str) -> str:
@@ -90,6 +92,14 @@ class ResearchRun:
             return {}
         return {key: str(data.get(key) or "") for key in ("search", "submit", "export") if str(data.get(key) or "")}
 
+    def xray_selectors(self) -> dict[str, str]:
+        try:
+            data = json.loads(self.selectors_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+        xray = data.get("xray") if isinstance(data, dict) else {}
+        return {key: str(xray.get(key) or "") for key in XRAY_SELECTOR_KEYS if isinstance(xray, dict) and str(xray.get(key) or "")}
+
     def remember_selectors(self, *, search: str = "", submit: str = "", export: str = "") -> None:
         selectors = self.selectors()
         for key, value in {"search": search, "submit": submit, "export": export}.items():
@@ -97,6 +107,18 @@ class ResearchRun:
             if clean:
                 selectors[key] = clean
         self.selectors_path.write_text(json.dumps(selectors, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    def remember_xray_selectors(self, **values: str) -> None:
+        try:
+            data = json.loads(self.selectors_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+        xray = data.setdefault("xray", {})
+        for key in XRAY_SELECTOR_KEYS:
+            value = str(values.get(key) or "").strip()
+            if value:
+                xray[key] = value
+        self.selectors_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     def next_keyword(self) -> str | None:
         rows = self._read()
@@ -140,6 +162,16 @@ class ResearchRun:
         row.update(state="paused", browser_url=str(browser_url), detail=" ".join(str(detail).split()))
         self._write(rows)
 
+    def record_outcome(self, keyword: str, state: str, detail: str, browser_url: str = "") -> None:
+        if state not in TERMINAL_STATES - {"completed"}:
+            raise ValueError(f"Unsupported research outcome: {state}")
+        rows = self._read()
+        row = next((item for item in rows if item["keyword"] == keyword and item["state"] == "active"), None)
+        if row is None:
+            raise ValueError(f"Keyword is not active in this research run: {keyword}")
+        row.update(state=state, completed_at=_now(), browser_url=str(browser_url), detail=" ".join(str(detail).split()))
+        self._write(rows)
+
     def resume(self, keyword: str) -> None:
         rows = self._read()
         row = next((item for item in rows if item["keyword"] == keyword and item["state"] == "paused"), None)
@@ -156,4 +188,8 @@ class ResearchRun:
             "active": [row["keyword"] for row in rows if row["state"] == "active"],
             "paused": [row["keyword"] for row in rows if row["state"] == "paused"],
             "completed": [row["keyword"] for row in rows if row["state"] == "completed"],
+            "no_data": [row["keyword"] for row in rows if row["state"] == "no_data"],
+            "download_missing": [row["keyword"] for row in rows if row["state"] == "download_missing"],
+            "verification_required": [row["keyword"] for row in rows if row["state"] == "verification_required"],
+            "site_changed": [row["keyword"] for row in rows if row["state"] == "site_changed"],
         }
