@@ -52,7 +52,8 @@ class ExternalActionGateway:
         self.max_actions = max(1, int(max_actions))
         self.max_repeats = max(1, int(max_repeats))
         self._actions = 0
-        self._signatures: dict[str, int] = {}
+        self._last_signature = ""
+        self._consecutive_repeats = 0
         self.on_action = on_action or (lambda _request: None)
 
     @staticmethod
@@ -123,11 +124,12 @@ class ExternalActionGateway:
         if self._actions >= self.max_actions:
             return ActionResult(False, f"ADP action limit reached ({self.max_actions}) for this task.", blocked=True)
         signature = self._signature(request)
-        repeats = self._signatures.get(signature, 0)
+        repeats = self._consecutive_repeats if signature == self._last_signature else 0
         if repeats >= self.max_repeats:
             return ActionResult(False, "ADP stopped a repeated identical action; inspect the last observed result and choose a different recovery step.", blocked=True)
         self._actions += 1
-        self._signatures[signature] = repeats + 1
+        self._last_signature = signature
+        self._consecutive_repeats = repeats + 1
         try:
             self.on_action(request)
             text = str(self.tools.execute(request.tool, request.args))
@@ -161,6 +163,7 @@ class ExternalActionGateway:
         prompt = str(initial_prompt or "")
         current_id = str(conversation_id or "")
         turns = 0
+        blank_turns = 0
         while turns <= self.max_actions:
             text, returned_id = run_turn(prompt, current_id)
             turns += 1
@@ -175,6 +178,19 @@ class ExternalActionGateway:
                 )
             request = self.parse_action(text)
             if not request.tool and not request.error:
+                if not str(text or "").strip():
+                    blank_turns += 1
+                    if blank_turns == 1:
+                        prompt = (
+                            "Your previous turn returned no final response and requested no ADP action. "
+                            "Continue the task now: inspect the latest browser evidence and emit one valid adp_action, "
+                            "or return a concise final result."
+                        )
+                        continue
+                    return GatewayLoopResult(
+                        "Provider returned no actionable response after a recovery turn.", current_id,
+                        True, self._actions, turns,
+                    )
                 return GatewayLoopResult(str(text or ""), current_id, actions=self._actions, provider_turns=turns)
             result = self.execute(request)
             if result.blocked:

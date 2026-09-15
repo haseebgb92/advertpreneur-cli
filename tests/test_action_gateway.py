@@ -101,6 +101,40 @@ def test_gateway_formats_verified_result_packet_and_blocks_repeats():
     assert gateway.execute(request).blocked
 
 
+def test_gateway_allows_an_inspection_to_repeat_after_a_different_browser_action():
+    from advertpreneur_cli.action_gateway import ActionRequest, ExternalActionGateway
+
+    gateway = ExternalActionGateway(FakeTools({"browser": "ok"}), max_repeats=2)
+    inspect = ActionRequest("browser", {"action": "inspect", "selector": "body", "tab": "access"})
+    click = ActionRequest("browser", {"action": "click", "selector": "#login", "tab": "access"})
+
+    assert gateway.execute(inspect).ok
+    assert gateway.execute(inspect).ok
+    assert gateway.execute(click).ok
+    assert gateway.execute(inspect).ok
+
+
+def test_cli_treats_press_login_as_a_browser_continuation():
+    assert AdvertpreneurCLI._needs_browser_context("now press the login button") is True
+    assert AdvertpreneurCLI._needs_browser_context("create a local Python file") is False
+
+
+def test_gateway_recovers_once_when_provider_turn_is_blank():
+    from advertpreneur_cli.action_gateway import ExternalActionGateway
+
+    tools = FakeTools({"browser": "Browser bridge connected"})
+    responses = iter([
+        ("", "thread"),
+        ('```adp_action\n{"tool":"browser","args":{"action":"status"}}\n```', "thread"),
+        ("Browser checked; finished.", "thread"),
+    ])
+
+    result = ExternalActionGateway(tools).drive("Inspect the browser", lambda _prompt, _thread: next(responses))
+
+    assert result.text == "Browser checked; finished."
+    assert tools.calls == [("browser", {"action": "status"})]
+
+
 def test_gateway_contract_requires_verified_results_and_preserves_login_delete_boundaries():
     from advertpreneur_cli.action_gateway import ExternalActionGateway
 

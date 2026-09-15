@@ -64,7 +64,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.28.9"
+VERSION = "0.28.10"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -304,6 +304,17 @@ class AdvertpreneurCLI:
                 self.tools.tool_browser("navigate", url=url, tab="amazon")
                 return True
         return False
+
+    @staticmethod
+    def _needs_browser_context(instruction: str) -> bool:
+        """Recognize short follow-ups that operate the already-open browser tab."""
+        text = str(instruction or "").lower()
+        browser_terms = (
+            "browser", "website", "web page", "hero", "reverse engineer", "reverse-engineer",
+            "screenshot", "design", "click", "press", "button", "login", "log in", "sign in",
+            "continue", "next", "dropdown", "modal", "tab",
+        )
+        return any(term in text for term in browser_terms)
 
     def _request_approval(self, kind: str, detail: str) -> bool:
         """Ask the owning CLI thread to render an approval prompt safely.
@@ -3681,7 +3692,7 @@ class AdvertpreneurCLI:
             if current_url:
                 task_text = re.sub(r"https?://THE-SITE-HERE/?|THE-SITE-HERE", current_url, task_text, flags=re.I)
                 self.ui.muted(f"Browser context · placeholder resolved to {current_url} · local / cloud 0")
-        if browser_hint and any(x in task_text.lower() for x in ("browser", "website", "web page", "hero", "reverse engineer", "reverse-engineer", "screenshot", "design")):
+        if browser_hint and self._needs_browser_context(task_text):
             task_text = browser_hint + "\n\n" + task_text
         inline_mentions = []
         image_paths: List[Path] = []
