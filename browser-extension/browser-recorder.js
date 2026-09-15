@@ -37,10 +37,15 @@
   }
   document.addEventListener("click", (e) => {
     if (!e.isTrusted) return;
-    const el=e.target instanceof Element ? (e.target.closest("a,button,[role=button],input,select,textarea") || e.target) : null;
+    // composedPath exposes the real target inside open Shadow DOM.  The Xray
+    // toolbar retargets document clicks to a generic host div, so selector-only
+    // recording made several distinct controls look identical.
+    const path = typeof e.composedPath === "function" ? e.composedPath() : [];
+    const source = path.find((node) => node instanceof Element && !node.closest?.("[data-adp-control-bar='1']")) || e.target;
+    const el=source instanceof Element ? (source.closest("a,button,[role=button],input,select,textarea") || source) : null;
     const selector=selectorFor(el); if(!selector) return;
     const a=el?.closest?.("a[href]");
-    send({ action:"click", args:{selector}, evidence:{before_url:location.href,target:a?.href||"",element_text:String(el?.innerText||el?.textContent||"").replace(/\s+/g," ").trim().slice(0,160),verified:true} });
+    send({ action:"click", args:{selector,x:Math.round(e.clientX),y:Math.round(e.clientY)}, evidence:{before_url:location.href,target:a?.href||"",element_text:String(el?.innerText||el?.textContent||"").replace(/\s+/g," ").trim().slice(0,160),verified:true} });
   }, true);
   document.addEventListener("change", (e) => {
     if (!e.isTrusted) return;

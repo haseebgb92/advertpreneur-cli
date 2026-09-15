@@ -64,7 +64,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.28.16"
+VERSION = "0.28.17"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -3676,7 +3676,14 @@ class AdvertpreneurCLI:
             self.ui.error("Ollama Cloud is signed out · use /login or choose /model → Local")
             return None
 
-        local_reply = self._run_taught_workflow(raw) or self._zero_token_reply(raw)
+        try:
+            taught_reply = self._run_taught_workflow(raw)
+        except Exception as exc:
+            # Taught workflows are deliberately local.  Never let an invalid
+            # recorded selector escape this worker or fall through into an
+            # expensive provider recovery loop.
+            taught_reply = f"Taught workflow stopped safely · {exc}"
+        local_reply = taught_reply or self._zero_token_reply(raw)
         if local_reply:
             self.budget.reset_task()
             self._current_task_raw = raw

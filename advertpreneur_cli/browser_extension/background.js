@@ -335,7 +335,7 @@ async function browserCommand(command) {
     return {provider:"existing-edge/extension", verified:true, ...result};
   }
   if (action === "learn_start") {
-    const requested = Array.isArray(args.tabs) && args.tabs.length ? args.tabs.map(slotName) : [slot];
+    const requested = Array.isArray(args.tabs) ? args.tabs.map(slotName) : [];
     const learnedTabs = {};
     let tab = null;
     for (const requestedSlot of requested) {
@@ -344,8 +344,24 @@ async function browserCommand(command) {
       learnedTabs[String(candidate.id)] = requestedSlot;
       if (!tab) tab = candidate;
     }
+    // Enrol only pages we can identify from their live URL. This replaces the
+    // old persisted-slot seed, which could label an unrelated page as `work`.
+    for (const candidate of await chrome.tabs.query({})) {
+      const url = String(candidate?.url || "").toLowerCase();
+      const inferred = url.includes("members.softzilla.net") ? "access" : url.includes("helium10.com") ? "helium" : url.includes("amazon.") ? "amazon" : "";
+      if (!candidate?.id || !inferred || Object.values(learnedTabs).includes(inferred)) continue;
+      learnedTabs[String(candidate.id)] = inferred;
+      await saveControlledTab(inferred, candidate);
+      if (!tab) tab = candidate;
+    }
+    // Learn mode is a fresh recording. Do not inherit a stale `work` slot;
+    // live page events and child-tab creation assign roles during this lesson.
+    if (!tab) tab = await existingControlledTab(slot);
+    if (!tab) {
+      const candidates = await chrome.tabs.query({});
+      tab = candidates.find((candidate) => /^https?:/i.test(String(candidate.url || ""))) || null;
+    }
     if (!tab) tab = await ensureControlledTab("about:blank", slot);
-    learnedTabs[String(tab.id)] = slot;
     await storageSet(LEARN_KEY, { active: true, name: String(args.name || "routine"), tabs: learnedTabs, startedAt: Date.now() });
     await setControlBar(tab.id, `Advertpreneur Learn Mode · ${String(args.name || "routine")}`, "working");
     return { provider: "existing-edge/extension", learning: true, tab_id: tab.id, url: tab.url || "", title: tab.title || "", verified: true };
@@ -438,12 +454,26 @@ async function browserCommand(command) {
   }
   if (action === "click") {
     const selector = String(args.selector || ""); const beforeUrl = tab.url || ""; const beforeIds = new Set((await chrome.tabs.query({})).map((row) => row.id)); await setControlBar(tab.id, "Advertpreneur · clicking", "working");
-    const result = await executeInTab(tab.id, (sel) => {
-      const el=document.querySelector(sel); if(!el)return{error:`Selector not found: ${sel}`};
-      const anchor=el.closest("a") || (el.tagName === "A" ? el : null); const target=anchor?.href || "";
-      const rect=el.getBoundingClientRect(); el.scrollIntoView({block:"center",inline:"nearest",behavior:"instant"}); el.click();
-      return {ok:true,target,element_text:String(el.innerText||el.textContent||"").replace(/\s+/g," ").trim().slice(0,160), box:{x:Math.round(rect.x),y:Math.round(rect.y),width:Math.round(rect.width),height:Math.round(rect.height)}};
-    }, [selector]);
+    const x = Number(args.x); const y = Number(args.y);
+    const hasPointer = Number.isFinite(x) && Number.isFinite(y) && x >= 0 && y >= 0;
+    let result;
+    if (hasPointer) {
+      // A real pointer event reaches controls inside open/closed Shadow DOM;
+      // document.querySelector cannot reliably do that for browser extensions.
+      await attachDebugger(tab.id);
+      try {
+        await sendDebugger(tab.id, "Input.dispatchMouseEvent", {type:"mousePressed", x, y, button:"left", clickCount:1});
+        await sendDebugger(tab.id, "Input.dispatchMouseEvent", {type:"mouseReleased", x, y, button:"left", clickCount:1});
+      } finally { await detachDebugger(tab.id); }
+      result = {ok:true, target:"", element_text:"", pointer:{x,y}};
+    } else {
+      result = await executeInTab(tab.id, (sel) => {
+        const el=document.querySelector(sel); if(!el)return{error:`Selector not found: ${sel}`};
+        const anchor=el.closest("a") || (el.tagName === "A" ? el : null); const target=anchor?.href || "";
+        const rect=el.getBoundingClientRect(); el.scrollIntoView({block:"center",inline:"nearest",behavior:"instant"}); el.click();
+        return {ok:true,target,element_text:String(el.innerText||el.textContent||"").replace(/\s+/g," ").trim().slice(0,160), box:{x:Math.round(rect.x),y:Math.round(rect.y),width:Math.round(rect.width),height:Math.round(rect.height)}};
+      }, [selector]);
+    }
     if(result?.error)throw new Error(result.error);
     const expectsNav=Boolean(result?.target && !String(result.target).toLowerCase().startsWith("javascript:")); const deadline=Date.now()+Number(args.verify_ms||5000); let current=await chrome.tabs.get(tab.id);
     while(expectsNav && current?.url===beforeUrl && Date.now()<deadline){await sleep(180); current=await chrome.tabs.get(tab.id);}
@@ -493,12 +523,47 @@ async function browserProviderLoop() {
   }
 }
 
+async function reportLearnTabOpened(tab, learn, learnedSlot) {
+  if (!tab?.id || !learn?.active || !learnedSlot) return;
+  const tabId = String(tab.id);
+  if (learn.reported_tabs?.[tabId]) return;
+  learn.reported_tabs = {...(learn.reported_tabs || {}), [tabId]: true};
+  await storageSet(LEARN_KEY, learn);
+  const id = await providerIdentity();
+  await bridgeFetch("/v1/browser/learn-event", {
+    method: "POST",
+    body: { provider_id: id.providerId, token: id.token, event: {
+      action: "tab_open",
+      args: {tab: learnedSlot},
+      evidence: {url: String(tab.url || ""), title: String(tab.title || ""), verified: true}
+    }},
+    timeoutMs: 3000
+  });
+}
+
+chrome.tabs.onCreated.addListener((tab) => {
+  (async () => {
+    const learn = await storageGet(LEARN_KEY, null);
+    const openerId = String(tab?.openerTabId || "");
+    const parentSlot = String(learn?.tabs?.[openerId] || "");
+    if (!learn?.active || !parentSlot || !tab?.id) return;
+    const hasHelium = Object.values(learn.tabs || {}).includes("helium");
+    const learnedSlot = parentSlot === "access" && !hasHelium ? "helium" : `learned-${tab.id}`;
+    learn.tabs = {...(learn.tabs || {}), [String(tab.id)]: learnedSlot};
+    await storageSet(LEARN_KEY, learn);
+    await saveControlledTab(learnedSlot, tab);
+    await setControlBar(tab.id, `Advertpreneur Learn Mode · ${String(learn.name || "routine")}`, "working");
+  })().catch(() => {});
+});
+
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status !== "complete") return;
   (async () => {
     const learn = await storageGet(LEARN_KEY, null);
     if (learn?.active && learn?.tabs?.[String(tabId)]) {
+      const tab = await chrome.tabs.get(tabId);
       await setControlBar(tabId, `Advertpreneur Learn Mode · ${String(learn.name || "routine")}`, "working");
+      await reportLearnTabOpened(tab, learn, String(learn.tabs[String(tabId)]));
       return;
     }
     const controlled = await existingControlledTab();

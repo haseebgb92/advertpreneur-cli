@@ -531,10 +531,11 @@ class BrowserController:
         self._update_page_state(page)
         return f"Clicked {selector!r} · {self.current_url}"
 
-    def click(self, selector: str, tab: str = "work", capture_tab: str = "") -> str:
+    def click(self, selector: str, tab: str = "work", capture_tab: str = "", x: int | None = None, y: int | None = None) -> str:
         if self._extension_available(wait_seconds=0.5):
-            row = self._extension_call("click", timeout=25, selector=selector, verify_ms=8000, tab=tab, capture_tab=capture_tab)
-            self.routines.record("click", {"selector": selector, "tab": tab}, row)
+            pointer = {"x": int(x), "y": int(y)} if x is not None and y is not None else {}
+            row = self._extension_call("click", timeout=25, selector=selector, verify_ms=8000, tab=tab, capture_tab=capture_tab, **pointer)
+            self.routines.record("click", {"selector": selector, "tab": tab, **pointer}, row)
             outcome = "navigation verified" if row.get("navigated") else "click verified"
             return (
                 f"Clicked {selector!r} · {outcome} · existing-edge/extension · "
@@ -627,8 +628,11 @@ class BrowserController:
         return Path(filename)
 
     def learn_start(self, name: str) -> str:
-        tabs = self.get_slots()
-        actual = self.routines.start(name, protected_tabs=tabs)
+        # A lesson must be based on tabs actually used during this recording.
+        # Copying the previous slot map here made an old `work` tab look like
+        # part of a new multi-tab routine and later caused replay to navigate
+        # the wrong tab.
+        actual = self.routines.start(name, protected_tabs={})
         # Clear any stale human events and arm the existing-browser recorder.
         try:
             self.bridge.browser_learn_events()
@@ -636,7 +640,7 @@ class BrowserController:
             pass
         if self._extension_available(wait_seconds=0.8):
             try:
-                row = self._extension_call("learn_start", timeout=10, name=actual, tabs=list(tabs))
+                self._extension_call("learn_start", timeout=10, name=actual, tabs=[])
             except Exception:
                 pass
         return f"Browser Learn Mode ON · recording {actual!r} · AI/direct commands and human actions in the controlled tab are captured locally"
@@ -706,7 +710,9 @@ class BrowserController:
                     if action == "navigate":
                         self.navigate(str(args.get("url") or ""), str(args.get("wait_until") or "domcontentloaded"), tab=tab)
                     elif action == "click":
-                        result = self.click(str(args.get("selector") or ""), tab=tab)
+                        x = args.get("x") if isinstance(args.get("x"), (int, float)) else None
+                        y = args.get("y") if isinstance(args.get("y"), (int, float)) else None
+                        result = self.click(str(args.get("selector") or ""), tab=tab, x=x, y=y)
                         expected = str((step.get("evidence") or {}).get("url") or "")
                         if expected and (step.get("evidence") or {}).get("navigated") and self.current_url != expected:
                             raise BrowserRoutineError(f"Routine click did not reach expected URL: {expected}; current: {self.current_url}")

@@ -181,6 +181,26 @@ def test_extension_marks_all_learned_tabs_as_learning():
     assert "await setControlBar(senderTab.id, `Advertpreneur Learn Mode" in source
 
 
+def test_extension_enrolls_a_tab_opened_from_a_taught_access_tab():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "browser-extension" / "background.js").read_text(encoding="utf-8")
+
+    assert "chrome.tabs.onCreated.addListener" in source
+    assert "openerTabId" in source
+    assert '"helium"' in source
+    assert 'action: "tab_open"' in source
+
+
+def test_human_recorder_replays_exact_pointer_for_shadow_dom_controls():
+    root = Path(__file__).resolve().parents[1]
+    recorder = (root / "browser-extension" / "browser-recorder.js").read_text(encoding="utf-8")
+    background = (root / "browser-extension" / "background.js").read_text(encoding="utf-8")
+
+    assert "e.composedPath" in recorder
+    assert "args:{selector,x:" in recorder
+    assert '"Input.dispatchMouseEvent"' in background
+
+
 def test_codex_missing_five_hour_is_not_invented():
     q = ExternalProviderHarness._parse_codex_quota_response({
         "rateLimits": {"primary": {"usedPercent": 7, "windowDurationMins": 10080, "resetsAt": 2000001000}, "secondary": None}
