@@ -168,6 +168,22 @@ class BrowserRoutineStore:
             return data[actual]
         raise BrowserRoutineError(f"Browser routine not found: {name}")
 
+    def stop_review(self, name: str) -> str:
+        row = self.get(name)
+        tabs = row.get("protected_tabs") if isinstance(row.get("protected_tabs"), dict) else {}
+        lines = [f"Taught workflow: {row.get('name') or name}", "Protected tabs: " + (", ".join(sorted(tabs)) or "none")]
+        for slot in sorted(tabs):
+            tab = tabs[slot] if isinstance(tabs[slot], dict) else {}
+            lines.append(f"  [{slot}] {tab.get('title') or 'Untitled'} · {tab.get('url') or ''}")
+        lines.append("Replay steps:")
+        for index, step in enumerate(row.get("steps") or [], start=1):
+            args = step.get("args") if isinstance(step, dict) and isinstance(step.get("args"), dict) else {}
+            action = str(step.get("action") or "")
+            tab = str(args.get("tab") or "work")
+            target = str(args.get("selector") or args.get("url") or args.get("amount") or "")
+            lines.append(f"{index}. [{tab}] {action} {target}".rstrip())
+        return "\n".join(lines)
+
     def delete(self, name: str) -> bool:
         data = self._load()
         key = next((k for k in data if k.lower() == str(name or "").lower()), None)

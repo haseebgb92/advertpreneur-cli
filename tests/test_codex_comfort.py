@@ -11,6 +11,7 @@ def test_codex_comfort_commands_present():
     values = {x.value for x in COMMANDS}
     for cmd in {"/personality", "/goal", "/raw", "/mention", "/archive", "/unarchive", "/delete", "/config", "/debug-config", "/keymap", "/title", "/index", "/map", "/undo", "/checkpoints", "/agents", "/settings"}:
         assert cmd in values
+    assert "/teach" in values
 
 
 def test_at_file_and_folder_completion():

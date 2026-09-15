@@ -53,6 +53,18 @@ def test_teach_routine_omits_non_search_fill_values(tmp_path: Path):
     assert store.stop()["steps"] == []
 
 
+def test_taught_workflow_review_lists_tabs_and_numbered_steps(tmp_path: Path):
+    store = BrowserRoutineStore(tmp_path)
+    store.start("amazon-xray", protected_tabs={"amazon": {"url": "https://amazon.com", "title": "Amazon"}})
+    store.record("click", {"selector": "#analyze", "tab": "amazon"}, {"verified": True})
+    store.stop()
+
+    review = store.stop_review("amazon-xray")
+
+    assert "Protected tabs: amazon" in review
+    assert "1. [amazon] click #analyze" in review
+
+
 def test_broker_buffers_human_browser_learning_events(tmp_path: Path):
     state = BrokerState(tmp_path / "pairs.json")
     reg = state.browser_register({"provider_id": "edge1", "token": "secret", "label": "Edge"})

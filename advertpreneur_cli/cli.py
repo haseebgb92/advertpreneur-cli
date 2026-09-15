@@ -2663,6 +2663,29 @@ class AdvertpreneurCLI:
             self.ui.error(f"Browser · {exc}")
             if self.local_telemetry: self.telemetry.record("browser", action=low or "status", browser_provider=self.tools.browser_controller.provider, ok=False, detail=str(exc)[:300])
 
+    def teach_command(self, arg: str | None = None) -> None:
+        text = (arg or "").strip()
+        controller = self.tools.browser_controller
+        try:
+            if text.lower() == "stop":
+                saved = controller.learn_stop()
+                name = controller.last_learned_routine
+                self.ui.success(saved)
+                if name:
+                    self.ui.info(controller.routines.stop_review(name))
+            elif text.lower() == "cancel":
+                self.ui.muted(controller.learn_cancel())
+            elif text.lower() == "list":
+                rows = controller.routine_names()
+                self.ui.info("Taught workflows: " + (", ".join(rows) if rows else "none"))
+            elif text:
+                self.ui.success(controller.learn_start(text))
+                self.ui.muted("Use the protected browser tabs normally, then run /teach stop to review every saved step.")
+            else:
+                self.ui.error("Usage: /teach <name> | stop | cancel | list")
+        except Exception as exc:
+            self.ui.error(f"Teach · {exc}")
+
     def insights_command(self, arg: str | None = None) -> None:
         period = (arg or "today").strip().lower()
         if period not in {"today", "day", "week", "weekly", "7d"}:
@@ -4450,6 +4473,8 @@ class AdvertpreneurCLI:
             self.handbook_command(arg)
         elif cmd == "/browser":
             self.browser_command(arg)
+        elif cmd == "/teach":
+            self.teach_command(arg)
         elif cmd == "/web":
             self.web_command(arg)
         elif cmd == "/hooks":

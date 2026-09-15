@@ -116,6 +116,7 @@ COMMANDS: List[MenuItem] = [
     MenuItem("/frameworks", "/frameworks", "Show locally detected framework intelligence packs"),
     MenuItem("/handbook", "/handbook", "Search validated local engineering experience"),
     MenuItem("/browser", "/browser", "Local browser navigation, screenshots and design maps"),
+    MenuItem("/teach", "/teach", "Record a safe multi-tab browser workflow: /teach <name>|stop|cancel|list"),
     MenuItem("/web", "/web", "Search the public web locally without an Ollama call"),
     MenuItem("/hooks", "/hooks", "Configure local lifecycle hooks"),
     MenuItem("/daemon", "/daemon", "Manage background loopback mission daemon server"),

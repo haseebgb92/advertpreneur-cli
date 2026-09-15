@@ -63,6 +63,7 @@ class BrowserController:
         self._provider = "idle"
         self._current_url = ""
         self._current_title = ""
+        self.last_learned_routine = ""
 
         # The following are touched only by the worker thread.
         self._pw = None
@@ -658,6 +659,7 @@ class BrowserController:
         except Exception:
             pass
         row = self.routines.stop()
+        self.last_learned_routine = str(row.get("name") or "")
         return f"Browser routine saved · {row.get('name')} · {len(row.get('steps') or [])} step(s) · replay uses 0 model tokens"
 
     def learn_cancel(self) -> str:
