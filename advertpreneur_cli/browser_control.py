@@ -446,9 +446,9 @@ class BrowserController:
         viewport = page.viewport_size or {"width": "?", "height": "?"}
         return f"Screenshot saved · {rel} · {viewport.get('width')}x{viewport.get('height')} viewport · cloud tokens 0"
 
-    def screenshot(self, name: str = "page", selector: str = "", full_page: bool = True) -> str:
+    def screenshot(self, name: str = "page", selector: str = "", full_page: bool = True, tab: str = "work") -> str:
         if self._extension_available(wait_seconds=1.0):
-            row = self._extension_call("screenshot", timeout=25, name=name, selector=selector, full_page=full_page)
+            row = self._extension_call("screenshot", timeout=25, name=name, selector=selector, full_page=full_page, tab=tab)
             data_url = str(row.get("data_url") or "")
             if not data_url.startswith("data:image/"):
                 raise BrowserUnavailable("Existing-browser extension returned no screenshot data")
@@ -458,6 +458,8 @@ class BrowserController:
             path = self.browser_dir / f"{safe}.{ext}"
             path.write_bytes(base64.b64decode(encoded))
             return f"Screenshot · {path} · existing-edge/extension · viewport capture"
+        if tab != "work":
+            raise BrowserUnavailable("Named browser tabs require the connected Advertpreneur Browser Bridge extension")
         return str(self._rpc("screenshot", name, selector, full_page, timeout=45))
 
     def _inspect_direct(self, selector: str = "body", max_elements: int = 60) -> str:

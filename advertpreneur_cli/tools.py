@@ -15,6 +15,7 @@ from .operations import OperationLedger, ProjectIdentity
 from .panel_playbooks import PanelPlaybookRegistry, PlaybookError
 from .research_workflow import ResearchRun
 from .xray_workflow import XrayProgress, next_xray_action
+from .browser_visual import BrowserVisualMemory
 
 if TYPE_CHECKING:
     from .resource_guard import ResourceGuard
@@ -83,7 +84,7 @@ RESEARCH_SCHEMAS = [
 
 BROWSER_SCHEMAS = [
     tool_schema("browser", "Control the user's local browser. Prefer measured reverse-engineering over visual guessing. Browser actions must be verified by observable state. Learned routines replay deterministic browser steps without model rediscovery.", {
-        "action": {"type": "string", "enum": ["status", "operations_status", "navigate", "open", "site_detect", "site_profile", "site_playbook", "site_open", "site_upload", "inspect", "screenshot", "reverse_engineer", "click", "fill", "scroll", "wait", "upload", "wordpress_state", "workspace_list", "workspace_stage", "workspace_zip", "workspace_extract", "workspace_move", "wordpress_propose_delete", "wordpress_approve_delete", "wordpress_delete", "research_start", "research_xray_setup", "research_status", "research_search", "research_export", "research_run", "research_pause", "research_resume", "run_routine", "routine_list", "close"]},
+        "action": {"type": "string", "enum": ["status", "operations_status", "navigate", "open", "site_detect", "site_profile", "site_playbook", "site_open", "site_upload", "inspect", "visual_context", "screenshot", "reverse_engineer", "click", "fill", "scroll", "wait", "upload", "wordpress_state", "workspace_list", "workspace_stage", "workspace_zip", "workspace_extract", "workspace_move", "wordpress_propose_delete", "wordpress_approve_delete", "wordpress_delete", "research_start", "research_xray_setup", "research_status", "research_search", "research_export", "research_run", "research_pause", "research_resume", "run_routine", "routine_list", "close"]},
         "url": {"type": "string"}, "selector": {"type": "string"}, "name": {"type": "string"}, "tab": {"type": "string", "description": "Named Browser Bridge tab slot, such as access, helium, or amazon"}, "capture_tab": {"type": "string", "description": "Save a new tab opened by click into this named slot"},
         "value": {"type": "string"}, "amount": {"type": ["integer", "string"]}, "milliseconds": {"type": "integer"}, "repeat": {"type": "integer"},
         "max_elements": {"type": "integer"}, "full_page": {"type": "boolean"}, "file_path": {"type": "string"}, "proposal_id": {"type": "string"}, "approval_token": {"type": "string"},
@@ -140,6 +141,7 @@ class ToolRegistry:
         self.browser_visible = bool(browser_visible)
         self.resource_guard = resource_guard
         self.browser_controller = BrowserController(self.root, visible=self.browser_visible)
+        self.browser_visual = BrowserVisualMemory(self.root)
         self.wp_workspace = WordPressWorkspace(self.root)
         self._delete_proposals: dict[str, DeletionProposal] = {}
         self.site_adapters = SiteAdapterRegistry()
@@ -823,8 +825,34 @@ class ToolRegistry:
                         raise
             if action == "inspect":
                 return self.browser_controller.inspect(selector or "body", max_elements=max_elements, tab=tab)
+            if action == "visual_context":
+                context = self.browser_controller.visible_controls(tab=tab)
+                controls = context.get("controls") if isinstance(context.get("controls"), list) else []
+                observation = self.browser_visual.observe(
+                    tab,
+                    str(context.get("url") or ""),
+                    str(context.get("title") or ""),
+                    controls,
+                )
+                screenshot = ""
+                if observation.capture_screenshot:
+                    screenshot = self.browser_controller.screenshot(
+                        name=f"{tab}-visual",
+                        full_page=False,
+                        tab=tab,
+                    )
+                return json.dumps({
+                    "url": str(context.get("url") or ""),
+                    "title": str(context.get("title") or ""),
+                    "controls": controls,
+                    "fingerprint": observation.fingerprint,
+                    "screenshot": screenshot,
+                }, ensure_ascii=False)
             if action == "screenshot":
-                return self.browser_controller.screenshot(name=name or "page", selector=selector, full_page=full_page)
+                try:
+                    return self.browser_controller.screenshot(name=name or "page", selector=selector, full_page=full_page, tab=tab)
+                except TypeError:
+                    return self.browser_controller.screenshot(name=name or "page", selector=selector, full_page=full_page)
             if action == "reverse_engineer":
                 return self.browser_controller.reverse_engineer(selector=selector or "body", name=name or "design-map", max_elements=max_elements)
             if action == "click":

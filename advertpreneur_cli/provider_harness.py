@@ -583,6 +583,17 @@ class ExternalProviderHarness:
 
     PROVIDERS = {"codex", "agy"}
 
+    @staticmethod
+    def supports_image_attachments(provider: str) -> bool:
+        """Return only capabilities implemented by ADP's current transport.
+
+        Both external integrations currently send text prompts.  Models may be
+        vision-capable in their own products, but ADP must not claim a local
+        browser screenshot was attached until its runtime transport actually
+        carries that image.
+        """
+        return False
+
     def __init__(self, app_dir: Path, project: Path) -> None:
         self.app_dir = app_dir
         self.project = project.resolve()

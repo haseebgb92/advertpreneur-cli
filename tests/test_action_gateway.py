@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from advertpreneur_cli.cli import AdvertpreneurCLI
-from advertpreneur_cli.provider_harness import ProviderRun
+from advertpreneur_cli.provider_harness import ExternalProviderHarness, ProviderRun
 from advertpreneur_cli.tools import ToolError, ToolRegistry
 
 
@@ -160,6 +160,26 @@ def test_browser_inspect_uses_a_compact_default_observation(tmp_path):
 
     assert tools.tool_browser("inspect", tab="access") == "{}"
     assert observed == [(24, {"tab": "access"})]
+
+
+def test_visual_context_returns_compact_controls_and_one_screenshot(tmp_path):
+    class Browser:
+        def visible_controls(self, **_kwargs): return {"url": "https://example.test/login", "title": "Login", "controls": [{"role": "button", "label": "Login", "selector": "#login"}]}
+        def screenshot(self, **_kwargs): return "Screenshot · test.jpg · viewport capture"
+    tools = ToolRegistry(tmp_path)
+    tools.browser_controller = Browser()
+    first = __import__("json").loads(tools.tool_browser("visual_context", tab="access"))
+    second = __import__("json").loads(tools.tool_browser("visual_context", tab="access"))
+    assert first["controls"][0]["label"] == "Login"
+    assert first["screenshot"]
+    assert second["screenshot"] == ""
+
+
+@pytest.mark.parametrize("provider", ["codex", "agy"])
+def test_external_provider_harness_does_not_claim_image_attachment_support(provider, tmp_path):
+    harness = ExternalProviderHarness(tmp_path / "app", tmp_path)
+
+    assert harness.supports_image_attachments(provider) is False
 
 
 def test_gateway_contract_requires_verified_results_and_preserves_login_delete_boundaries():
