@@ -238,8 +238,8 @@ def test_learn_start_arms_all_named_tabs_and_stop_preserves_event_tab(tmp_path: 
     summary = ctl.learn_stop()
 
     assert calls[0] == ("learn_start", {"timeout": 10, "name": "amazon-xray", "tabs": ["access", "helium", "amazon"]})
-    assert "2 step" in summary
-    assert ctl.routines.get("amazon-xray")["steps"][-1]["args"]["tab"] == "amazon"
+    assert "1 step" in summary
+    assert ctl.routines.get("amazon-xray")["steps"][0]["args"]["tab"] == "amazon"
 
 
 def test_taught_routine_requires_protected_tabs_and_injects_only_new_keyword(tmp_path: Path):

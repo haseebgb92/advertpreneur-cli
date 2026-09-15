@@ -345,7 +345,7 @@ async function browserCommand(command) {
       if (!tab) tab = candidate;
     }
     if (!tab) tab = await ensureControlledTab("about:blank", slot);
-    learnedTabs[String(tab.id)] = slotName(await storageGet(TAB_KEY, slot));
+    learnedTabs[String(tab.id)] = slot;
     await storageSet(LEARN_KEY, { active: true, name: String(args.name || "routine"), tabs: learnedTabs, startedAt: Date.now() });
     await setControlBar(tab.id, `Advertpreneur Learn Mode · ${String(args.name || "routine")}`, "working");
     return { provider: "existing-edge/extension", learning: true, tab_id: tab.id, url: tab.url || "", title: tab.title || "", verified: true };
@@ -523,10 +523,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
       const active = await storageGet(LEARN_KEY, null);
       const senderTabId = String(_sender?.tab?.id || "");
-      const learnedSlot = String(active?.tabs?.[senderTabId] || "");
-      if (!active?.active || !learnedSlot) return;
+      if (!active?.active) return;
+      let learnedSlot = String(active?.tabs?.[senderTabId] || "");
+      const senderTab = _sender?.tab;
+      if (!learnedSlot && senderTab?.id) {
+        const url = String(senderTab.url || "").toLowerCase();
+        const preferred = url.includes("members.softzilla.net") ? "access" : url.includes("helium10.com") ? "helium" : url.includes("amazon.") ? "amazon" : `learned-${senderTab.id}`;
+        learnedSlot = preferred;
+        if (Object.values(active.tabs || {}).includes(preferred)) learnedSlot = `learned-${senderTab.id}`;
+        active.tabs = {...(active.tabs || {}), [senderTabId]: learnedSlot};
+        await storageSet(LEARN_KEY, active);
+        await saveControlledTab(learnedSlot, senderTab);
+      }
+      if (!learnedSlot) return;
       const event = message.event && typeof message.event === "object" ? {...message.event} : {};
       event.args = event.args && typeof event.args === "object" ? {...event.args, tab: learnedSlot} : {tab: learnedSlot};
+      event.evidence = event.evidence && typeof event.evidence === "object" ? {...event.evidence, url: String(senderTab?.url || event.evidence.url || ""), title: String(senderTab?.title || event.evidence.title || "")} : {url: String(senderTab?.url || ""), title: String(senderTab?.title || "")};
       const id = await providerIdentity();
       await bridgeFetch("/v1/browser/learn-event", {
         method: "POST",

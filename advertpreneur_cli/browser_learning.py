@@ -141,6 +141,13 @@ class BrowserRoutineStore:
         self._learning_steps.append(step)
         self._persist_learning()
 
+    def protect_tab(self, slot: str, url: str, title: str = "") -> None:
+        self._hydrate_learning()
+        if not self.learning:
+            return
+        self._learning_tabs.update(self._safe_tabs({slot: {"url": url, "title": title}}))
+        self._persist_learning()
+
     def stop(self) -> Dict[str, Any]:
         self._hydrate_learning()
         if not self.learning:

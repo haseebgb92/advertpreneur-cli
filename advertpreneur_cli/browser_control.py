@@ -637,9 +637,6 @@ class BrowserController:
         if self._extension_available(wait_seconds=0.8):
             try:
                 row = self._extension_call("learn_start", timeout=10, name=actual, tabs=list(tabs))
-                current = str(row.get("url") or self.current_url or "")
-                if current.startswith(("http://", "https://")):
-                    self.routines.record("navigate", {"url": current, "wait_until": "domcontentloaded"}, {"url": current, "verified": True})
             except Exception:
                 pass
         return f"Browser Learn Mode ON · recording {actual!r} · AI/direct commands and human actions in the controlled tab are captured locally"
@@ -656,6 +653,10 @@ class BrowserController:
                 action = str(event.get("action") or "").lower()
                 args = event.get("args") if isinstance(event.get("args"), dict) else {}
                 evidence = event.get("evidence") if isinstance(event.get("evidence"), dict) else {}
+                tab = str(args.get("tab") or "").strip()
+                if tab:
+                    self.routines.protect_tab(tab, str(evidence.get("url") or ""), str(evidence.get("title") or ""))
+                    self.record_slot(tab, str(evidence.get("url") or ""), str(evidence.get("title") or ""))
                 self.routines.record(action, args, evidence)
         except Exception:
             pass
