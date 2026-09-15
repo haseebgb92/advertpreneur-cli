@@ -524,13 +524,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const active = await storageGet(LEARN_KEY, null);
       const senderTabId = String(_sender?.tab?.id || "");
       if (!active?.active) return;
-      let learnedSlot = String(active?.tabs?.[senderTabId] || "");
       const senderTab = _sender?.tab;
+      const url = String(senderTab?.url || "").toLowerCase();
+      const inferred = url.includes("members.softzilla.net") ? "access" : url.includes("helium10.com") ? "helium" : url.includes("amazon.") ? "amazon" : "";
+      let learnedSlot = String(active?.tabs?.[senderTabId] || "");
+      if (inferred && (learnedSlot === "work" || !learnedSlot)) learnedSlot = inferred;
       if (!learnedSlot && senderTab?.id) {
-        const url = String(senderTab.url || "").toLowerCase();
-        const preferred = url.includes("members.softzilla.net") ? "access" : url.includes("helium10.com") ? "helium" : url.includes("amazon.") ? "amazon" : `learned-${senderTab.id}`;
+        const preferred = inferred || `learned-${senderTab.id}`;
         learnedSlot = preferred;
         if (Object.values(active.tabs || {}).includes(preferred)) learnedSlot = `learned-${senderTab.id}`;
+        active.tabs = {...(active.tabs || {}), [senderTabId]: learnedSlot};
+        await storageSet(LEARN_KEY, active);
+        await saveControlledTab(learnedSlot, senderTab);
+      }
+      if (senderTab?.id && active?.tabs?.[senderTabId] !== learnedSlot) {
         active.tabs = {...(active.tabs || {}), [senderTabId]: learnedSlot};
         await storageSet(LEARN_KEY, active);
         await saveControlledTab(learnedSlot, senderTab);

@@ -64,7 +64,7 @@ from .updater import DEFAULT_REPOSITORY, GitHubReleaseClient, UpdateError, apply
 from .tui import COMMANDS, MenuItem, TerminalUI
 
 
-VERSION = "0.28.14"
+VERSION = "0.28.15"
 APP_DIR = Path.home() / ".advertpreneur-cli"
 _APPROVAL_WAKE = "\x00ADP_APPROVAL\x00"
 _TASK_DONE_WAKE = "\x00ADP_TASK_DONE\x00"
@@ -3031,6 +3031,20 @@ class AdvertpreneurCLI:
                 return "OK" if answer in {"ok", "okay"} else answer.capitalize()
         return ""
 
+    def _run_taught_workflow(self, text: str) -> str:
+        match = re.match(r"^\s*(.+?)\s+with\s+(.+?)\s*$", str(text or ""), flags=re.I)
+        if not match:
+            return ""
+        requested = " ".join(match.group(1).split()).lower()
+        keyword = re.sub(r"\s+keyword\s*$", "", match.group(2), flags=re.I).strip()
+        if not keyword:
+            return ""
+        controller = self.tools.browser_controller
+        for name in controller.routine_names():
+            if name.lower() == requested:
+                return controller.run_routine(name, keyword=keyword)
+        return ""
+
     def _codex_mcp_states(self, task_text: str) -> Dict[str, bool]:
         """Return explicit per-turn states for user-enabled Codex MCP servers.
 
@@ -3662,7 +3676,7 @@ class AdvertpreneurCLI:
             self.ui.error("Ollama Cloud is signed out · use /login or choose /model → Local")
             return None
 
-        local_reply = self._zero_token_reply(raw)
+        local_reply = self._run_taught_workflow(raw) or self._zero_token_reply(raw)
         if local_reply:
             self.budget.reset_task()
             self._current_task_raw = raw
