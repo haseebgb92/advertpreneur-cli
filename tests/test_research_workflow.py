@@ -48,6 +48,11 @@ def test_research_run_pauses_an_active_keyword_without_losing_later_work(tmp_pat
 def test_research_run_can_resume_a_paused_keyword(tmp_path: Path):
     run = ResearchRun.create(tmp_path, "Baby products", ["baby sleep sack"])
     assert run.next_keyword() == "baby sleep sack"
+    run.pause("baby sleep sack", "sign-in required")
+
+    run.resume("baby sleep sack")
+
+    assert run.next_keyword() == "baby sleep sack"
 
 
 def test_research_run_records_no_data_without_completion(tmp_path: Path):
@@ -66,11 +71,6 @@ def test_research_run_persists_observed_xray_selectors(tmp_path: Path):
     run.remember_xray_selectors(open="#open", rows="[data-asin]", load_more="#more", refresh="#refresh", export="#export", csv="#csv")
 
     assert run.xray_selectors()["load_more"] == "#more"
-    run.pause("baby sleep sack", "sign-in required")
-
-    run.resume("baby sleep sack")
-
-    assert run.next_keyword() == "baby sleep sack"
 
 
 def test_research_run_keeps_only_successful_observed_selectors_for_reuse(tmp_path: Path):
