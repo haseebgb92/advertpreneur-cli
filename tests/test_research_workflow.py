@@ -275,3 +275,13 @@ def test_explicit_helium_access_url_bootstraps_access_tab_before_provider_turn()
 
     assert cli._bootstrap_explicit_browser_tabs("First go to https://members.softzilla.net/member and launch Helium 10") is True
     assert calls == [("navigate", {"url": "https://members.softzilla.net/member", "tab": "access"})]
+
+
+def test_xray_setup_requires_and_persists_observed_selectors(tmp_path: Path):
+    tools = ToolRegistry(tmp_path, approval_mode="full")
+    tools.browser_controller._extension_available = lambda **_kwargs: True
+    tools.tool_browser("research_start", name="Xray Run", value="silicone baking mat")
+
+    payload = '{"search":"#search","submit":"#submit","open":"#open","rows":"[data-asin]","load_more":"#more","refresh":"#refresh","export":"#export","csv":"#csv"}'
+    assert "Xray selectors saved" in tools.tool_browser("research_xray_setup", name="Xray Run", value=payload)
+    assert tools._research_run("Xray Run").xray_selectors()["rows"] == "[data-asin]"

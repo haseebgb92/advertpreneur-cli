@@ -323,6 +323,17 @@ async function browserCommand(command) {
     if (current?.id) await setControlBar(current.id, "Advertpreneur is controlling this tab", "active");
     return { provider: "existing-edge/extension", running: Boolean(current), tab: slot, tabs: Object.keys(slots), tab_id: current?.id || 0, url: current?.url || "", title: current?.title || "" };
   }
+  if (action === "selector_state") {
+    const tab = await ensureControlledTab("about:blank", slot);
+    const selector = String(args.selector || "");
+    if (!selector) throw new Error("selector_state requires selector");
+    const result = await executeInTab(tab.id, (sel) => {
+      const rows = Array.from(document.querySelectorAll(sel));
+      const visible = rows.some(el => { const style = getComputedStyle(el); const rect = el.getBoundingClientRect(); return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0; });
+      return {count: rows.length, visible};
+    }, [selector]);
+    return {provider:"existing-edge/extension", verified:true, ...result};
+  }
   if (action === "learn_start") {
     const tab = await ensureControlledTab("about:blank", slot);
     await storageSet(LEARN_KEY, { active: true, name: String(args.name || "routine"), tabId: tab.id, startedAt: Date.now() });

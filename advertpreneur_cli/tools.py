@@ -612,6 +612,21 @@ class ToolRegistry:
                     raise ToolError("Research runs require the connected Advertpreneur Browser Bridge extension and its existing browser session")
                 run = ResearchRun.create(self.root, name, keywords)
                 return json.dumps({"research_run": run.name, "ledger": str(run.ledger_path.relative_to(self.root)), **run.status()}, ensure_ascii=False)
+            if action == "research_xray_setup":
+                run = self._research_run(name)
+                try:
+                    selectors = json.loads(value)
+                except Exception as exc:
+                    raise ToolError("research_xray_setup value must be a JSON selector object") from exc
+                if not isinstance(selectors, dict):
+                    raise ToolError("research_xray_setup value must be a JSON selector object")
+                required = ("search", "submit", "open", "rows", "load_more", "refresh", "export", "csv")
+                missing = [key for key in required if not str(selectors.get(key) or "").strip()]
+                if missing:
+                    raise ToolError("research_xray_setup missing observed selector(s): " + ", ".join(missing))
+                run.remember_selectors(search=str(selectors["search"]), submit=str(selectors["submit"]), export=str(selectors["export"]))
+                run.remember_xray_selectors(**{key: str(selectors[key]) for key in ("open", "rows", "load_more", "refresh", "export", "csv")})
+                return "Xray selectors saved · ready for observed Amazon-tab processing"
             if action == "research_status":
                 return json.dumps(self._research_run(name).status(), ensure_ascii=False)
             if action == "research_pause":

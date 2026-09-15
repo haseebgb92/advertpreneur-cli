@@ -55,6 +55,16 @@ def test_existing_edge_extension_is_preferred_for_navigation(tmp_path: Path):
     assert ctl.current_url == "https://example.com/"
 
 
+def test_extension_selector_state_reports_count_and_visibility(tmp_path: Path):
+    ctl = BrowserController(tmp_path)
+    ctl._extension_available = lambda **_kwargs: True
+    calls = []
+    ctl._extension_call = lambda action, **kwargs: calls.append((action, kwargs)) or {"count": 24, "visible": True}
+
+    assert ctl.selector_state("[data-asin]", tab="amazon") == {"count": 24, "visible": True}
+    assert calls == [("selector_state", {"timeout": 12, "selector": "[data-asin]", "tab": "amazon"})]
+
+
 def test_extension_reverse_engineer_saves_local_map_and_screenshot(tmp_path: Path):
     ctl = BrowserController(tmp_path, visible=True)
     ctl._extension_available = lambda wait_seconds=0.0: True

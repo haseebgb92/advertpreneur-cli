@@ -504,6 +504,15 @@ class BrowserController:
             raise BrowserUnavailable("Named browser tabs require the connected Advertpreneur Browser Bridge extension")
         return str(self._rpc("inspect", selector, max_elements, timeout=35))
 
+    def selector_state(self, selector: str, tab: str = "work") -> dict[str, Any]:
+        """Return observed count and visibility for a selector in a named extension tab."""
+        if not selector:
+            raise BrowserUnavailable("Selector state requires an observed selector")
+        if not self._extension_available(wait_seconds=0.8):
+            raise BrowserUnavailable("Named selector state requires the connected Advertpreneur Browser Bridge extension")
+        row = self._extension_call("selector_state", timeout=12, selector=selector, tab=tab)
+        return {"count": int(row.get("count") or 0), "visible": bool(row.get("visible"))}
+
     def _click_direct(self, selector: str) -> str:
         page = self._ensure_direct()
         page.locator(selector).first.click(timeout=15000)
