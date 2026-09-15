@@ -44,6 +44,17 @@ def test_extension_status_labels_successful_status_command_connected(tmp_path: P
     assert "connected" in controller.status().lower()
 
 
+def test_browser_controller_returns_compact_visible_controls(tmp_path: Path, monkeypatch):
+    controller = BrowserController(tmp_path)
+    monkeypatch.setattr(controller, "_extension_available", lambda **_kwargs: True)
+    monkeypatch.setattr(controller, "_extension_call", lambda *_args, **_kwargs: {
+        "url": "https://members.softzilla.net/login", "title": "Login",
+        "controls": [{"role": "button", "label": "Login", "selector": "button[type=submit]", "x": 500, "y": 484}],
+    })
+
+    assert controller.visible_controls(tab="access")["controls"][0]["label"] == "Login"
+
+
 def test_existing_edge_extension_is_preferred_for_navigation(tmp_path: Path):
     ctl = BrowserController(tmp_path, visible=True)
     ctl._extension_available = lambda wait_seconds=0.0: True

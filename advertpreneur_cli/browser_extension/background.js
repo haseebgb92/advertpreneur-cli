@@ -386,6 +386,30 @@ async function browserCommand(command) {
     if (tab?.id) await setControlBar(tab.id, "Advertpreneur is controlling this tab", "active");
     await reportProgress("navigated", "Navigation verified", tab); return { provider: "existing-edge/extension", url: tab?.url || url, title: tab?.title || "", tab_id: tab?.id || 0, verified: true };
   }
+  if (action === "visible_controls") {
+    tab = await chrome.tabs.get(tab.id);
+    const controls = await executeInTab(tab.id, () => {
+      const clean = (value) => String(value || "").replace(/\s+/g, " ").trim().slice(0, 120);
+      const selector = (el) => {
+        if (el.id) return `#${CSS.escape(el.id)}`;
+        const name = el.getAttribute("name");
+        if (name) return `${el.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
+        const label = el.getAttribute("aria-label");
+        if (label) return `${el.tagName.toLowerCase()}[aria-label="${CSS.escape(label)}"]`;
+        return el.tagName.toLowerCase();
+      };
+      return Array.from(document.querySelectorAll("button,a,input,select,[role=button],[role=link]")).filter((el) => {
+        if (el.dataset?.adpControlBar === "1" || el.closest?.("[data-adp-control-bar='1']")) return false;
+        const r = el.getBoundingClientRect(); const s = getComputedStyle(el);
+        return r.width >= 2 && r.height >= 2 && s.display !== "none" && s.visibility !== "hidden";
+      }).slice(0, 24).map((el) => {
+        const r = el.getBoundingClientRect();
+        const role = el.getAttribute("role") || (el.tagName === "A" ? "link" : el.tagName === "BUTTON" ? "button" : el.tagName.toLowerCase());
+        return {role, label: clean(el.getAttribute("aria-label") || el.innerText || el.textContent || el.getAttribute("placeholder")), selector: selector(el), x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height)};
+      });
+    });
+    return {provider:"existing-edge/extension", url:tab.url || "", title:tab.title || "", controls, verified:true};
+  }
   if (action === "inspect" || action === "reverse_engineer") {
     tab = await chrome.tabs.get(tab.id); await setControlBar(tab.id, `Advertpreneur · ${action === "inspect" ? "inspecting" : "reverse engineering"}`, "working");
     const result = await executeInTab(tab.id, snapshotFunction, [String(args.selector || "body"), Number(args.max_elements || (action === "reverse_engineer" ? 140 : 70))]);

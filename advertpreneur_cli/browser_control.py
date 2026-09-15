@@ -513,6 +513,13 @@ class BrowserController:
         row = self._extension_call("selector_state", timeout=12, selector=selector, tab=tab)
         return {"count": int(row.get("count") or 0), "visible": bool(row.get("visible"))}
 
+    def visible_controls(self, tab: str = "work") -> dict[str, Any]:
+        if not self._extension_available(wait_seconds=0.8):
+            raise BrowserUnavailable("Named visible controls require the connected Advertpreneur Browser Bridge extension")
+        row = self._extension_call("visible_controls", timeout=12, tab=tab)
+        controls = row.get("controls") if isinstance(row.get("controls"), list) else []
+        return {"url": str(row.get("url") or ""), "title": str(row.get("title") or ""), "controls": [item for item in controls if isinstance(item, dict)][:24]}
+
     def _click_direct(self, selector: str) -> str:
         page = self._ensure_direct()
         page.locator(selector).first.click(timeout=15000)
