@@ -496,11 +496,13 @@ async function browserProviderLoop() {
 chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status !== "complete") return;
   (async () => {
-    const controlled = await existingControlledTab();
-    if (!controlled?.id || Number(controlled.id) !== Number(tabId)) return;
     const learn = await storageGet(LEARN_KEY, null);
-    if (learn?.active) await setControlBar(tabId, `Advertpreneur Learn Mode · ${String(learn.name || "routine")}`, "working");
-    else await setControlBar(tabId, "Advertpreneur is controlling this tab", "active");
+    if (learn?.active && learn?.tabs?.[String(tabId)]) {
+      await setControlBar(tabId, `Advertpreneur Learn Mode · ${String(learn.name || "routine")}`, "working");
+      return;
+    }
+    const controlled = await existingControlledTab();
+    if (controlled?.id && Number(controlled.id) === Number(tabId)) await setControlBar(tabId, "Advertpreneur is controlling this tab", "active");
   })().catch(() => {});
 });
 
@@ -543,6 +545,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         await saveControlledTab(learnedSlot, senderTab);
       }
       if (!learnedSlot) return;
+      if (senderTab?.id) await setControlBar(senderTab.id, `Advertpreneur Learn Mode · ${String(active.name || "routine")}`, "working");
       const event = message.event && typeof message.event === "object" ? {...message.event} : {};
       event.args = event.args && typeof event.args === "object" ? {...event.args, tab: learnedSlot} : {tab: learnedSlot};
       event.evidence = event.evidence && typeof event.evidence === "object" ? {...event.evidence, url: String(senderTab?.url || event.evidence.url || ""), title: String(senderTab?.title || event.evidence.title || "")} : {url: String(senderTab?.url || ""), title: String(senderTab?.title || "")};

@@ -173,6 +173,14 @@ def test_extension_manifest_loads_human_recorder():
     assert (root / "browser-extension" / "browser-recorder.js").exists()
 
 
+def test_extension_marks_all_learned_tabs_as_learning():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "browser-extension" / "background.js").read_text(encoding="utf-8")
+
+    assert "learn?.tabs?.[String(tabId)]" in source
+    assert "await setControlBar(senderTab.id, `Advertpreneur Learn Mode" in source
+
+
 def test_codex_missing_five_hour_is_not_invented():
     q = ExternalProviderHarness._parse_codex_quota_response({
         "rateLimits": {"primary": {"usedPercent": 7, "windowDurationMins": 10080, "resetsAt": 2000001000}, "secondary": None}
