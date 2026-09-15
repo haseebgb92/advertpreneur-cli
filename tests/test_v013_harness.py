@@ -6,7 +6,9 @@ import json
 import threading
 from pathlib import Path
 
-from advertpreneur_cli.browser_control import BrowserController
+import pytest
+
+from advertpreneur_cli.browser_control import BrowserController, BrowserRoutineError
 from advertpreneur_cli.provider_harness import ExternalProviderHarness
 from advertpreneur_cli.telemetry import HarnessTelemetry
 from advertpreneur_cli.tui import TerminalUI
@@ -238,3 +240,24 @@ def test_learn_start_arms_all_named_tabs_and_stop_preserves_event_tab(tmp_path: 
     assert calls[0] == ("learn_start", {"timeout": 10, "name": "amazon-xray", "tabs": ["access", "helium", "amazon"]})
     assert "2 step" in summary
     assert ctl.routines.get("amazon-xray")["steps"][-1]["args"]["tab"] == "amazon"
+
+
+def test_taught_routine_requires_protected_tabs_and_injects_only_new_keyword(tmp_path: Path):
+    ctl = BrowserController(tmp_path, visible=True)
+    ctl.routines._save({"amazon-xray": {"name": "amazon-xray", "protected_tabs": {"amazon": {"url": "https://amazon.com", "title": "Amazon"}}, "steps": [{"action": "fill", "args": {"selector": "#search", "value": "[TEACH_KEYWORD]", "tab": "amazon"}}]}})
+    ctl.get_slots = lambda: {"amazon": {"url": "https://amazon.com", "title": "Amazon"}}
+    fills = []
+    ctl.fill = lambda selector, value, tab="work": fills.append((selector, value, tab))
+
+    ctl.run_routine("amazon-xray", keyword="stainless steel knife sharpener")
+
+    assert fills == [("#search", "stainless steel knife sharpener", "amazon")]
+
+
+def test_taught_routine_stops_when_a_protected_tab_url_does_not_match(tmp_path: Path):
+    ctl = BrowserController(tmp_path, visible=True)
+    ctl.routines._save({"amazon-xray": {"name": "amazon-xray", "protected_tabs": {"amazon": {"url": "https://amazon.com", "title": "Amazon"}}, "steps": []}})
+    ctl.get_slots = lambda: {"amazon": {"url": "https://example.test", "title": "Changed"}}
+
+    with pytest.raises(BrowserRoutineError, match="protected tab mismatch: amazon"):
+        ctl.run_routine("amazon-xray", keyword="bee wax wrap")

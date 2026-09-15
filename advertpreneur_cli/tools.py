@@ -873,7 +873,7 @@ class ToolRegistry:
             if action == "run_routine":
                 if not name:
                     raise ToolError("browser run_routine requires name")
-                return self.browser_controller.run_routine(name, repeat=repeat)
+                return self.browser_controller.run_routine(name, repeat=repeat, keyword=value)
             if action == "close":
                 return self.browser_controller.close()
         except (BrowserUnavailable, WorkspaceError, SiteAdapterError, PlaybookError) as exc:

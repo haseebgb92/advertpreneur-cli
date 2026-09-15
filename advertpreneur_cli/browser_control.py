@@ -8,6 +8,7 @@ import re
 import shutil
 import threading
 import time
+from urllib.parse import urlsplit, urlunsplit
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict
@@ -670,8 +671,22 @@ class BrowserController:
     def routine_names(self) -> list[str]:
         return self.routines.names()
 
-    def run_routine(self, name: str, repeat: int = 1) -> str:
+    @staticmethod
+    def _routine_url(value: object) -> str:
+        parsed = urlsplit(str(value or ""))
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+
+    def _verify_protected_tabs(self, protected_tabs: dict[str, Any]) -> None:
+        current = self.get_slots()
+        for slot, expected in protected_tabs.items():
+            expected_url = self._routine_url(expected.get("url") if isinstance(expected, dict) else "")
+            actual_url = self._routine_url((current.get(slot) or {}).get("url"))
+            if not expected_url or actual_url != expected_url:
+                raise BrowserRoutineError(f"protected tab mismatch: {slot}; re-teach this changed step")
+
+    def run_routine(self, name: str, repeat: int = 1, keyword: str = "") -> str:
         row = self.routines.get(name)
+        self._verify_protected_tabs(row.get("protected_tabs") if isinstance(row.get("protected_tabs"), dict) else {})
         count = max(1, min(100, int(repeat)))
         steps = list(row.get("steps") or [])
         if not steps:
@@ -686,22 +701,27 @@ class BrowserController:
                 for step in steps:
                     action = str(step.get("action") or "")
                     args = dict(step.get("args") or {})
+                    tab = str(args.get("tab") or "work")
                     if action == "navigate":
-                        self.navigate(str(args.get("url") or ""), str(args.get("wait_until") or "domcontentloaded"))
+                        self.navigate(str(args.get("url") or ""), str(args.get("wait_until") or "domcontentloaded"), tab=tab)
                     elif action == "click":
-                        result = self.click(str(args.get("selector") or ""))
+                        result = self.click(str(args.get("selector") or ""), tab=tab)
                         expected = str((step.get("evidence") or {}).get("url") or "")
                         if expected and (step.get("evidence") or {}).get("navigated") and self.current_url != expected:
                             raise BrowserRoutineError(f"Routine click did not reach expected URL: {expected}; current: {self.current_url}")
                     elif action == "fill":
                         value = str(args.get("value") or "")
-                        if value == "[NOT_STORED_SENSITIVE_VALUE]":
+                        if value == "[TEACH_KEYWORD]":
+                            if not keyword.strip():
+                                raise BrowserRoutineError("Routine needs a keyword for its taught search step")
+                            value = keyword
+                        elif value == "[NOT_STORED_SENSITIVE_VALUE]":
                             raise BrowserRoutineError("Routine contains a sensitive fill value that was intentionally not stored")
-                        self.fill(str(args.get("selector") or ""), value)
+                        self.fill(str(args.get("selector") or ""), value, tab=tab)
                     elif action == "scroll":
-                        self.scroll(args.get("amount", 650))
+                        self.scroll(args.get("amount", 650), tab=tab)
                     elif action == "wait":
-                        self.wait(int(args.get("milliseconds", 750)))
+                        self.wait(int(args.get("milliseconds", 750)), tab=tab)
                     else:
                         raise BrowserRoutineError(f"Unsupported routine action: {action}")
                     executed += 1
