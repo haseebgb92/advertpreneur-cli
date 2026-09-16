@@ -201,6 +201,15 @@ def test_human_recorder_replays_exact_pointer_for_shadow_dom_controls():
     assert '"Input.dispatchMouseEvent"' in background
 
 
+def test_named_replay_tab_is_rediscovered_instead_of_creating_about_blank():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "browser-extension" / "background.js").read_text(encoding="utf-8")
+
+    assert "async function discoverLiveTab" in source
+    assert "Browser tab unavailable for slot" in source
+    assert "await discoverLiveTab(slot)" in source
+
+
 def test_codex_missing_five_hour_is_not_invented():
     q = ExternalProviderHarness._parse_codex_quota_response({
         "rateLimits": {"primary": {"usedPercent": 7, "windowDurationMins": 10080, "resetsAt": 2000001000}, "secondary": None}

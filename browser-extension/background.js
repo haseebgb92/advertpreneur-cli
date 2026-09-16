@@ -162,9 +162,29 @@ async function existingControlledTab(slot = "work") {
   }
 }
 
+async function discoverLiveTab(slot) {
+  const name = slotName(slot);
+  if (!new Set(["access", "helium", "amazon"]).has(name)) return null;
+  const tabs = await chrome.tabs.query({});
+  const matches = (tab) => {
+    const url = String(tab?.url || "").toLowerCase();
+    if (name === "access") return url.includes("members.softzilla.net/member");
+    if (name === "helium") return url.includes("helium10") || url.includes("members.softzilla.net/page/helium10");
+    return url.includes("amazon.");
+  };
+  const tab = tabs.find(matches) || null;
+  if (tab?.id) await saveControlledTab(name, tab);
+  return tab;
+}
+
 async function ensureControlledTab(url = "about:blank", slot = "work") {
   let tab = await existingControlledTab(slot);
   if (tab) return tab;
+  tab = await discoverLiveTab(slot);
+  if (tab) return tab;
+  if (["access", "helium", "amazon"].includes(slotName(slot)) && String(url).toLowerCase() === "about:blank") {
+    throw new Error(`Browser tab unavailable for slot '${slotName(slot)}'; reopen the protected tab and re-run the routine`);
+  }
   tab = await chrome.tabs.create({ url, active: true });
   await saveControlledTab(slot, tab);
   return tab;
