@@ -516,6 +516,79 @@ async function browserCommand(command) {
     const ms=Math.max(0,Math.min(30000,Number(args.milliseconds||750))); await setControlBar(tab.id,`Advertpreneur · waiting ${ms}ms`,"working"); await sleep(ms); const current=await chrome.tabs.get(tab.id); await setControlBar(tab.id,"Advertpreneur is controlling this tab","active"); return {provider:"existing-edge/extension",url:current?.url||"",title:current?.title||"",verified:true,milliseconds:ms};
   }
   if (action === "close") { try{await chrome.tabs.remove(tab.id);}catch(_){} const slots=await controlledTabs(); delete slots[slot]; await storageSet(TAB_SLOTS_KEY,slots); if(slot==="work")await storageSet(TAB_KEY,null); return {provider:"existing-edge/extension",closed:true,tab:slot,verified:true}; }
+  if (action === "group_create") {
+    // Create an Edge/Chrome tab group containing all current ADP-named slots.
+    // Returns the group_id so the Python layer stores it; never uses title matching.
+    const title = String(args.title || "Advertpreneur");
+    const requestedSlots = Array.isArray(args.tabs) ? args.tabs.map(slotName) : [];
+    const tabIds = [];
+    for (const s of requestedSlots) {
+      const candidate = await existingControlledTab(s);
+      if (candidate?.id) tabIds.push(candidate.id);
+    }
+    if (!tabIds.length) return {provider:"existing-edge/extension",group_id:0,verified:false};
+    const groupId = await chrome.tabs.group({tabIds});
+    await chrome.tabGroups.update(groupId, {title, collapsed: false});
+    return {provider:"existing-edge/extension",group_id:groupId,title,tab_count:tabIds.length,verified:true};
+  }
+  if (action === "group_add_tab") {
+    // Add a named slot tab into the stored ADP group by ID.
+    const groupId = Number(args.group_id || 0);
+    if (!groupId) return {provider:"existing-edge/extension",added:false,reason:"no group_id"};
+    const candidate = await existingControlledTab(slot);
+    if (!candidate?.id) return {provider:"existing-edge/extension",added:false,reason:"slot not found"};
+    await chrome.tabs.group({groupId, tabIds:[candidate.id]});
+    return {provider:"existing-edge/extension",added:true,group_id:groupId,tab:slot,verified:true};
+  }
+  if (action === "group_close") {
+    // Close the ADP group only by stored ID. Never title-match.
+    const groupId = Number(args.group_id || 0);
+    if (!groupId) return {provider:"existing-edge/extension",closed:false,reason:"no group_id"};
+    let tabsClosed = 0;
+    try {
+      const tabs = await chrome.tabs.query({groupId});
+      if (tabs.length) {
+        await chrome.tabs.remove(tabs.map((t) => t.id));
+        tabsClosed = tabs.length;
+      }
+    } catch(_) {}
+    return {provider:"existing-edge/extension",closed:true,group_id:groupId,tabs_closed:tabsClosed,verified:true};
+  }
+  if (action === "cursor_show") {
+    // Inject a non-interactive black pointer overlay at browser-relative (x, y).
+    // pointer-events:none; excluded from recorder selectors and screenshots.
+    const cx = Number(args.x || 0); const cy = Number(args.y || 0);
+    await executeInTab(tab.id, (x, y) => {
+      const ID = "adp-action-cursor";
+      let el = document.getElementById(ID);
+      if (!el) {
+        el = document.createElement("div");
+        el.id = ID;
+        el.dataset.adpCursor = "1";
+        Object.assign(el.style, {
+          position: "fixed", zIndex: "2147483646", pointerEvents: "none",
+          width: "18px", height: "18px", left: x + "px", top: y + "px",
+          transform: "translate(-50%,-50%)",
+          borderRadius: "50%", background: "#000", opacity: "0.82",
+          boxShadow: "0 0 0 3px rgba(255,255,255,0.45), 0 2px 8px rgba(0,0,0,0.5)"
+        });
+        document.documentElement.appendChild(el);
+      } else {
+        el.style.left = x + "px"; el.style.top = y + "px"; el.style.display = "block";
+      }
+      return true;
+    }, [cx, cy]);
+    return {provider:"existing-edge/extension",cursor:"shown",x:cx,y:cy,tab:slot,verified:true};
+  }
+  if (action === "cursor_hide") {
+    // Remove the cursor overlay after action verification.
+    await executeInTab(tab.id, () => {
+      const el = document.getElementById("adp-action-cursor");
+      if (el) el.style.display = "none";
+      return true;
+    });
+    return {provider:"existing-edge/extension",cursor:"hidden",tab:slot,verified:true};
+  }
   throw new Error(`Unsupported browser action: ${action}`);
 }
 

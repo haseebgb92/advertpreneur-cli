@@ -65,6 +65,7 @@ class BrowserController:
         self._current_url = ""
         self._current_title = ""
         self.last_learned_routine = ""
+        self._adp_group_id: int = 0  # Chrome tab group ID owned by ADP; 0 means none created yet
 
         # The following are touched only by the worker thread.
         self._pw = None
@@ -628,11 +629,10 @@ class BrowserController:
         return Path(filename)
 
     def learn_start(self, name: str) -> str:
-        # A lesson must be based on tabs actually used during this recording.
-        # Copying the previous slot map here made an old `work` tab look like
-        # part of a new multi-tab routine and later caused replay to navigate
-        # the wrong tab.
-        actual = self.routines.start(name, protected_tabs={})
+        # Snapshot all currently-named tab slots so the extension can arm each
+        # one for recording and the routine store knows which tabs are protected.
+        tabs = self.get_slots()
+        actual = self.routines.start(name, protected_tabs=tabs)
         # Clear any stale human events and arm the existing-browser recorder.
         try:
             self.bridge.browser_learn_events()
@@ -640,7 +640,7 @@ class BrowserController:
             pass
         if self._extension_available(wait_seconds=0.8):
             try:
-                self._extension_call("learn_start", timeout=10, name=actual, tabs=[])
+                self._extension_call("learn_start", timeout=10, name=actual, tabs=list(tabs))
             except Exception:
                 pass
         return f"Browser Learn Mode ON · recording {actual!r} · AI/direct commands and human actions in the controlled tab are captured locally"
@@ -672,6 +672,91 @@ class BrowserController:
         name = self.routines.learning_name
         self.routines.cancel()
         return f"Browser Learn Mode canceled{(' · ' + name) if name else ''}"
+
+    # ------------------------------------------------------------------
+    # ADP Browser Group: isolated, visible workspace for ADP-owned tabs.
+    # ------------------------------------------------------------------
+
+    def group_create(self, title: str = "Advertpreneur") -> int:
+        """Create a named Edge/Chrome tab group containing all current ADP slots.
+
+        Stores the returned group ID so that subsequent slot creation and
+        child-tab capture can join the group.  ADP never creates a group by
+        title match; it always uses the stored integer ID.
+        """
+        if not self._extension_available(wait_seconds=0.5):
+            return 0
+        try:
+            slots = list(self.get_slots().keys())
+            row = self._extension_call("group_create", timeout=12, title=str(title or "Advertpreneur"), tabs=slots)
+            gid = int(row.get("group_id") or 0)
+            with self._state_lock:
+                self._adp_group_id = gid
+            return gid
+        except Exception:
+            return 0
+
+    def group_add_tab(self, slot: str) -> bool:
+        """Add a named slot to the ADP group (after capture or slot creation)."""
+        gid = self._adp_group_id
+        if not gid or not self._extension_available(wait_seconds=0.3):
+            return False
+        try:
+            self._extension_call("group_add_tab", timeout=8, group_id=gid, tab=str(slot))
+            return True
+        except Exception:
+            return False
+
+    def group_close(self, outcome: str = "") -> str:
+        """Close the ADP group only when the workflow returned a verified completed outcome.
+
+        Any other outcome (checkpoint, error, pause) leaves the group open for
+        inspection and resume.  ADP closes only the stored group ID it created;
+        it never searches by title.
+        """
+        gid = self._adp_group_id
+        if not gid:
+            return "No ADP browser group to close"
+        verified_complete = str(outcome or "").lower() == "completed"
+        if not verified_complete:
+            return f"ADP browser group {gid} preserved for inspection · outcome={outcome or 'none'}"
+        if not self._extension_available(wait_seconds=0.3):
+            return f"ADP browser group {gid} preserved · extension unavailable"
+        try:
+            self._extension_call("group_close", timeout=12, group_id=gid)
+            with self._state_lock:
+                self._adp_group_id = 0
+            return f"ADP browser group closed · group_id={gid}"
+        except Exception:
+            return f"ADP browser group {gid} preserved · close failed"
+
+    # ------------------------------------------------------------------
+    # Cursor overlay: black pointer shown immediately before each action.
+    # ------------------------------------------------------------------
+
+    def cursor_show(self, x: float, y: float, tab: str = "work") -> str:
+        """Show a non-interactive black pointer overlay at (x, y) in the named tab.
+
+        The overlay has pointer-events:none, is excluded from recorder
+        selectors and screenshots, and cannot affect page interaction.
+        """
+        if not self._extension_available(wait_seconds=0.3):
+            return ""
+        try:
+            self._extension_call("cursor_show", timeout=6, x=float(x), y=float(y), tab=tab)
+            return f"Cursor shown · ({x},{y}) · {tab}"
+        except Exception:
+            return ""
+
+    def cursor_hide(self, tab: str = "work") -> str:
+        """Remove the cursor overlay from the named tab after action verification."""
+        if not self._extension_available(wait_seconds=0.3):
+            return ""
+        try:
+            self._extension_call("cursor_hide", timeout=6, tab=tab)
+            return f"Cursor hidden · {tab}"
+        except Exception:
+            return ""
 
     def routine_names(self) -> list[str]:
         return self.routines.names()
