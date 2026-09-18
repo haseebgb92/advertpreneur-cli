@@ -36,7 +36,7 @@ jobs:
           [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($b64))
 
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($hash -ne "a11f85e17a02310ef3d7ffedb8f83dd168ae3a64eaddf9610f10ddd1567076c4") {
+          if ($hash -ne "d1607d183be4bffbb9358bb863144f84513c74284b8d50e15de70c113b6fe4eb") {
             throw "Compile harness checksum mismatch: $hash"
           }
 
