@@ -3,7 +3,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::env;
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -185,6 +186,8 @@ pub struct AntigravityResponse {
     #[serde(default)]
     pub error: Option<String>,
     #[serde(default)]
+    pub structured_output: Option<Value>,
+    #[serde(default)]
     pub usage: AntigravityUsage,
 }
 
@@ -214,7 +217,7 @@ impl AntigravityClient {
 
     pub fn list_models(&self) -> Result<Vec<AntigravityModel>, ModelError> {
         let output = Command::new(&self.program)
-            .arg("models")
+            .args(["models", "--output-format", "json"])
             .output()
             .map_err(|source| ModelError::CommandStart {
                 program: self.program.clone(),
@@ -228,9 +231,95 @@ impl AntigravityClient {
             });
         }
 
-        Ok(parse_antigravity_models(&String::from_utf8_lossy(
-            &output.stdout,
-        )))
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Ok(value) = serde_json::from_str::<Value>(&stdout) {
+            let mut models = Vec::new();
+            collect_antigravity_models_json(&value, &mut models);
+            models.sort_by(|a, b| a.slug.cmp(&b.slug));
+            models.dedup_by(|a, b| a.slug == b.slug);
+            if !models.is_empty() {
+                return Ok(models);
+            }
+        }
+
+        Ok(parse_antigravity_models(&stdout))
+    }
+
+    pub fn chat_structured(
+        &self,
+        model: &str,
+        prompt: &str,
+        schema: &Value,
+        agent: &str,
+    ) -> Result<AntigravityResponse, ModelError> {
+        let schema = serde_json::to_string(schema)
+            .map_err(|err| ModelError::InvalidPayload(err.to_string()))?;
+        let mut child = Command::new(&self.program)
+            .args([
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
+                "--model",
+                model,
+                "--agent",
+                agent,
+                "--json-schema",
+                &schema,
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|source| ModelError::CommandStart {
+                program: self.program.clone(),
+                source,
+            })?;
+
+        let message = json!({
+            "event": "user",
+            "message": {
+                "content": prompt
+            }
+        });
+        if let Some(mut stdin) = child.stdin.take() {
+            writeln!(stdin, "{message}").map_err(|source| ModelError::CommandStart {
+                program: self.program.clone(),
+                source,
+            })?;
+        }
+
+        let output = child
+            .wait_with_output()
+            .map_err(|source| ModelError::CommandStart {
+                program: self.program.clone(),
+                source,
+            })?;
+        if !output.status.success() {
+            return Err(ModelError::CommandFailed {
+                program: self.program.clone(),
+                status: output.status.to_string(),
+                stderr: truncate(&String::from_utf8_lossy(&output.stderr), 2_000),
+            });
+        }
+
+        for line in String::from_utf8_lossy(&output.stdout).lines().rev() {
+            let Ok(event) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            if event.get("event").and_then(Value::as_str) != Some("result") {
+                continue;
+            }
+            let Some(result) = event.get("result") else {
+                continue;
+            };
+            return serde_json::from_value::<AntigravityResponse>(result.clone())
+                .map_err(|err| ModelError::InvalidPayload(err.to_string()));
+        }
+
+        Err(ModelError::InvalidPayload(
+            "Antigravity stream did not contain a result event".to_string(),
+        ))
     }
 
     pub fn chat_text(&self, model: &str, prompt: &str) -> Result<AntigravityResponse, ModelError> {
@@ -251,6 +340,37 @@ impl AntigravityClient {
 
         serde_json::from_slice::<AntigravityResponse>(&output.stdout)
             .map_err(|err| ModelError::InvalidPayload(err.to_string()))
+    }
+}
+
+fn collect_antigravity_models_json(value: &Value, models: &mut Vec<AntigravityModel>) {
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                collect_antigravity_models_json(value, models);
+            }
+        }
+        Value::Object(map) => {
+            let slug = ["slug", "id", "model"]
+                .iter()
+                .find_map(|key| map.get(*key).and_then(Value::as_str));
+            let label = ["label", "display_name", "displayName", "name"]
+                .iter()
+                .find_map(|key| map.get(*key).and_then(Value::as_str));
+            if let Some(slug) = slug {
+                let label = label.unwrap_or(slug);
+                models.push(AntigravityModel {
+                    slug: slug.to_string(),
+                    label: label.to_string(),
+                });
+            }
+            for child in map.values() {
+                if child.is_array() || child.is_object() {
+                    collect_antigravity_models_json(child, models);
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -521,6 +641,20 @@ mod tests {
         let wire = serde_json::to_string(&message).unwrap();
         let parsed: ChatMessage = serde_json::from_str(&wire).unwrap();
         assert_eq!(parsed, message);
+    }
+
+    #[test]
+    fn antigravity_json_model_listing_parser_is_shape_tolerant() {
+        let value = json!({
+            "models": [
+                {"slug":"gemini-3.8-flash-high","label":"Gemini 3.8 Flash (High)"},
+                {"id":"claude-sonnet-4-6","display_name":"Claude Sonnet 4.6"}
+            ]
+        });
+        let mut models = Vec::new();
+        collect_antigravity_models_json(&value, &mut models);
+        assert!(models.iter().any(|model| model.slug == "gemini-3.8-flash-high"));
+        assert!(models.iter().any(|model| model.slug == "claude-sonnet-4-6"));
     }
 
     #[test]
