@@ -24,19 +24,16 @@ HANDLER_MATCH_OLD = """        let args = match payload {
 HANDLER_MATCH_NEW = """        let args = parse_tool_search_payload(payload)?;
 """
 
-HANDLER_HELPER = r"""
-fn parse_tool_search_payload(
+HANDLER_HELPER = r"""fn parse_tool_search_payload(
     payload: ToolPayload,
 ) -> Result<SearchToolCallParams, FunctionCallError> {
     match payload {
         ToolPayload::ToolSearch { arguments } => Ok(arguments),
-        ToolPayload::Function { arguments } => {
-            serde_json::from_str(&arguments).map_err(|err| {
-                FunctionCallError::RespondToModel(format!(
-                    "failed to parse tool_search arguments: {err}"
-                ))
-            })
-        }
+        ToolPayload::Function { arguments } => serde_json::from_str(&arguments).map_err(|err| {
+            FunctionCallError::RespondToModel(format!(
+                "failed to parse tool_search arguments: {err}"
+            ))
+        }),
         ToolPayload::Custom { .. } => Err(FunctionCallError::Fatal(format!(
             "{TOOL_SEARCH_TOOL_NAME} handler received unsupported payload"
         ))),
@@ -119,8 +116,8 @@ fn function_tool_search_payloads_roundtrip_as_function_outputs() {
         })
         .to_string(),
     };
-    let response = ToolSearchOutput { tools: Vec::new() }
-        .to_response_item("function-search-1", &payload);
+    let response =
+        ToolSearchOutput { tools: Vec::new() }.to_response_item("function-search-1", &payload);
 
     match response {
         ResponseInputItem::FunctionCallOutput { call_id, output } => {
