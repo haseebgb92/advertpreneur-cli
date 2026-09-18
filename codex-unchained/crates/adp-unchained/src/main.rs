@@ -5,6 +5,7 @@ use adp_memory::{ProjectMemory, SemanticTarget, TEACH_KEYWORD, WorkflowRepair, W
 use adp_model::{OllamaClient, OllamaConfig, OllamaTransport};
 use adp_protocol::ExecutionContext;
 use adp_teach::{TeachConfig, TeachRecordOutcome, TeachRecorder};
+use adp_web::{WebClient, WebConfig};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -30,8 +31,12 @@ enum Command {
     Models(ModelArgs),
     /// Check provider capabilities and connectivity.
     Doctor(ModelArgs),
-    /// Run a model conversation, optionally with the existing browser as a tool.
+    /// Run a model conversation with optional browser and web host tools.
     Chat(ChatArgs),
+    /// Search the public web through the Ollama host web API.
+    WebSearch(WebSearchArgs),
+    /// Fetch readable content for a public URL through the Ollama host web API.
+    WebFetch(WebFetchArgs),
     /// Record a browser demonstration into an executable .advertpreneur workflow.
     Teach(TeachArgs),
     /// Replay a learned .advertpreneur workflow without a model when state matches.
@@ -62,9 +67,35 @@ struct ChatArgs {
     model: ModelArgs,
     #[arg(long)]
     browser: bool,
+    #[arg(long)]
+    web: bool,
+    #[arg(long, default_value = "https://ollama.com")]
+    web_base_url: String,
+    #[arg(long, default_value = "OLLAMA_API_KEY")]
+    web_api_key_env: String,
     #[arg(long, default_value_t = 20)]
     browser_wait_seconds: u64,
     prompt: String,
+}
+
+#[derive(Debug, Args)]
+struct WebSearchArgs {
+    query: String,
+    #[arg(long, default_value_t = 5)]
+    max_results: u32,
+    #[arg(long, default_value = "https://ollama.com")]
+    base_url: String,
+    #[arg(long, default_value = "OLLAMA_API_KEY")]
+    api_key_env: String,
+}
+
+#[derive(Debug, Args)]
+struct WebFetchArgs {
+    url: String,
+    #[arg(long, default_value = "https://ollama.com")]
+    base_url: String,
+    #[arg(long, default_value = "OLLAMA_API_KEY")]
+    api_key_env: String,
 }
 
 #[derive(Debug, Args)]
@@ -116,6 +147,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Command::Models(args) => list_models(args).await?,
         Command::Doctor(args) => doctor(args).await?,
         Command::Chat(args) => chat(args).await?,
+        Command::WebSearch(args) => web_search(args).await?,
+        Command::WebFetch(args) => web_fetch(args).await?,
         Command::Teach(args) => teach(args).await?,
         Command::Replay(args) => replay(args).await?,
     }
@@ -182,7 +215,19 @@ async fn chat(args: ChatArgs) -> Result<(), Box<dyn Error>> {
         None
     };
 
+    let web = if args.web {
+        Some(WebClient::new(WebConfig {
+            base_url: args.web_base_url.clone(),
+            api_key_env: args.web_api_key_env.clone(),
+        })?)
+    } else {
+        None
+    };
+
     let mut agent = AgentRuntime::new(&model, &broker);
+    if let Some(web) = web.as_ref() {
+        agent = agent.with_web_client(web);
+    }
     if let Some(provider_id) = browser_provider {
         println!("Browser runtime connected: {provider_id}");
         agent = agent.with_browser_provider(provider_id);
@@ -196,6 +241,26 @@ async fn chat(args: ChatArgs) -> Result<(), Box<dyn Error>> {
         "model_turns={} tool_calls={} input_tokens={} output_tokens={}",
         result.model_turns, result.tool_calls, result.input_tokens, result.output_tokens
     );
+    Ok(())
+}
+
+async fn web_search(args: WebSearchArgs) -> Result<(), Box<dyn Error>> {
+    let client = WebClient::new(WebConfig {
+        base_url: args.base_url,
+        api_key_env: args.api_key_env,
+    })?;
+    let result = client.search(&args.query, Some(args.max_results)).await?;
+    println!("{}", serde_json::to_string_pretty(&result)?);
+    Ok(())
+}
+
+async fn web_fetch(args: WebFetchArgs) -> Result<(), Box<dyn Error>> {
+    let client = WebClient::new(WebConfig {
+        base_url: args.base_url,
+        api_key_env: args.api_key_env,
+    })?;
+    let result = client.fetch(&args.url).await?;
+    println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }
 
