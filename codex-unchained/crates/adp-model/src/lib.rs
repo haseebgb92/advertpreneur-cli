@@ -653,7 +653,11 @@ mod tests {
         });
         let mut models = Vec::new();
         collect_antigravity_models_json(&value, &mut models);
-        assert!(models.iter().any(|model| model.slug == "gemini-3.8-flash-high"));
+        assert!(
+            models
+                .iter()
+                .any(|model| model.slug == "gemini-3.8-flash-high")
+        );
         assert!(models.iter().any(|model| model.slug == "claude-sonnet-4-6"));
     }
 
