@@ -1,40 +1,124 @@
+# ADP Codex Unchained
 
-# Codex Unchained kernel prototype
+Provider-neutral Rust execution kernel for ADP. This branch makes the model provider the reasoning engine rather than the owner of Browser, Web, Teach, project memory, or execution capabilities.
 
-This directory is the isolated first-stage kernel for the ADP/Codex jailbreak.
+Current branch: `codex-unchained-v0.1`.
 
-It deliberately does **not** rename Codex or replace the existing Advertpreneur CLI. The first milestone establishes interfaces that let a Codex-derived agent runtime expose the same ADP-owned capabilities to any compatible model provider.
+## What works
 
-## Principles
+The workspace currently contains:
 
-- Provider identity must not decide whether shell, browser, computer-use, MCP, project memory, or native ADP tools exist.
-- Providers adapt to an ADP model/tool protocol; ADP does not shrink itself to a provider.
-- Browser and computer execution state lives outside the model.
-- Repeated work prefers executable memory over repeated reasoning.
-- Escalation order is deterministic replay -> local model -> primary/cloud model.
-- Successful repairs can update learned workflow memory.
-- `.advertpreneur` remains the project-local durable brain.
-- `/teach` stores semantic actions and verification, never credentials, cookies, MFA/OTP, payment data, screenshots, or arbitrary typed values.
+- provider-neutral tool/capability protocol;
+- Ollama local and Ollama Cloud model transport;
+- host-owned Chrome/Edge Browser runtime over an authenticated localhost Rust broker;
+- host-owned web search and web fetch tools;
+- semantic `/teach` workflow compilation into `.advertpreneur`;
+- zero-model deterministic workflow replay when the browser state matches;
+- local-model repair first, optional primary/cloud repair second;
+- verified repair persistence and resume-after-repair;
+- token/run accounting;
+- a runnable `adp-unchained` CLI;
+- reproducible compatibility patches against a pinned OpenAI Codex Rust revision.
 
-## Crates
+The normal CI compiles every workspace crate, runs rustfmt, clippy with warnings denied, all Rust tests, extension syntax checks, and CLI smoke commands.
 
-- `adp-protocol`: provider-neutral capabilities, tool calls, model events, execution tiers and budgets.
-- `adp-memory`: `.advertpreneur` workflow/state persistence and conservative redaction.
-- `adp-runtime`: provider-neutral tool exposure and repeat-task escalation policy.
-- `adp-browser-bridge`: typed protocol shared by the Rust broker and Chrome/Edge MV3 extension.
+## Build locally
 
-## Browser extension
+From this directory:
 
-`extension/` is a v2 local-only Chrome/Edge bridge prototype. It reuses the existing-browser approach from ADP but changes the payload shape around semantic snapshots and actions. Page snapshots intentionally include only a compact set of interactive controls instead of raw DOM or form values.
+```powershell
+cargo build -p adp-unchained --release
+.\target\release\adp-unchained.exe --help
+```
 
-## Next integration cut
+## Ollama local
 
-The next patch targets current upstream Codex Rust at the tool-planning boundary:
+Make sure Ollama is running, then:
 
-1. normalize provider tool-call dialects into one internal call shape;
-2. remove provider-name checks from tool exposure;
-3. allow direct/deferred tools whenever the adapter can represent calls;
-4. route Browser/Computer/MCP through ADP-owned runtimes;
-5. attach `.advertpreneur` state to turn/session context without dumping the full store into model context.
+```powershell
+adp-unchained doctor --provider local --model qwen3:1.7b
+adp-unchained chat --provider local --model qwen3:1.7b "Say hello and report your available host tools."
+```
 
-See `docs/UPSTREAM_CODEX_INTEGRATION.md`.
+Cloud models exposed through your signed-in local Ollama daemon can still be selected with `--provider local`; the CLI talks to the local daemon and does not need an OpenAI API key.
+
+## Browser
+
+Load `extension/` as an unpacked Chrome or Edge extension.
+
+Then:
+
+```powershell
+adp-unchained chat --browser --provider local --model qwen3:1.7b "Inspect the current page and summarize it."
+```
+
+Browser execution happens in the user's already-open browser profile through `127.0.0.1:8765`. The model receives semantic controls rather than raw form values.
+
+## Web
+
+Host web search/fetch is independent of the reasoning model. Set the Ollama web credential:
+
+```powershell
+$env:OLLAMA_API_KEY = "..."
+adp-unchained web-search "latest Rust release"
+adp-unchained web-fetch "https://example.com/"
+adp-unchained chat --web --provider local --model qwen3:1.7b "Research the latest Rust release and summarize it."
+```
+
+This means a small local model can request web search even though the model itself has no built-in web implementation. Without a web API credential, browser tools remain available for browser-driven research.
+
+## Teach and replay
+
+Teach a workflow by demonstrating it in the bound browser:
+
+```powershell
+adp-unchained teach helium-export --project D:\MyProject
+```
+
+Press Ctrl+C when the demonstration is finished. The recorder persists semantic steps incrementally.
+
+Replay it later:
+
+```powershell
+adp-unchained replay helium-export --project D:\MyProject --keyword "bee wax wrap"
+```
+
+Replay first tries the learned workflow with zero model calls. On state divergence it can use the configured local Ollama repair model. A primary/cloud repair model is only used when explicitly configured and local repair fails. Repairs are saved only after verification.
+
+## Privacy and safety of learned workflows
+
+Teach/replay intentionally does not persist passwords, tokens, OTP/MFA values, payment fields, cookies, screenshots, raw DOM, or arbitrary typed form values. Search/query/keyword text is represented as the runtime placeholder `[TEACH_KEYWORD]`.
+
+Potentially consequential clicks are learned but are not marked safe for deterministic replay.
+
+## Upstream Codex compatibility surgery
+
+`upstream-patches/` pins an exact OpenAI Codex revision and contains reproducible source transformations that:
+
+1. normalize compatible providers that emit `tool_search` as an ordinary function call into Codex's client-side tool-search payload;
+2. stop unknown/custom model fallback metadata from automatically disabling local tool discovery and skill/plugin/app guidance.
+
+`.github/workflows/codex-upstream-compat.yml` fetches the pinned upstream revision, applies both transformations, checks formatting, and runs focused upstream Codex tests.
+
+The ADP Browser/Web runtimes remain ADP-owned rather than depending on a proprietary browser helper.
+
+## Windows package
+
+The branch packaging workflow builds:
+
+- `adp-unchained.exe`;
+- the unpacked Chrome/Edge extension;
+- this README;
+- `INSTALL-WINDOWS.ps1`.
+
+Run the installer with:
+
+```powershell
+.\INSTALL-WINDOWS.ps1 -AddToPath
+```
+
+A separate job also attempts a reproducible Windows build of the pinned patched upstream `codex.exe` after applying the compatibility transformations.
+
+## Branch isolation
+
+This implementation is intentionally isolated from `main`. It does not overwrite the older Python ADP tree or any newer local Rust migration that has not been pushed to GitHub.
