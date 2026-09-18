@@ -112,11 +112,9 @@ impl<'a> TeachRecorder<'a> {
             return Ok(TeachRecordOutcome::Ignored);
         }
 
-        let Some(mut step) = compile_event(
-            &envelope.event,
-            self.workflow.steps.len() + 1,
-            self.tab_id,
-        )? else {
+        let Some(mut step) =
+            compile_event(&envelope.event, self.workflow.steps.len() + 1, self.tab_id)?
+        else {
             return Ok(TeachRecordOutcome::Ignored);
         };
 
@@ -145,10 +143,7 @@ impl<'a> TeachRecorder<'a> {
     }
 }
 
-async fn bind_active_tab(
-    broker: &BrokerState,
-    provider_id: &str,
-) -> Result<i64, TeachError> {
+async fn bind_active_tab(broker: &BrokerState, provider_id: &str) -> Result<i64, TeachError> {
     let result = broker
         .call(
             provider_id,
@@ -311,13 +306,9 @@ mod tests {
 
     #[test]
     fn parameterized_search_fill_can_be_deterministic() {
-        let step = compile_event(
-            &event("fill", "Search", Some(TEACH_KEYWORD)),
-            1,
-            7,
-        )
-        .unwrap()
-        .unwrap();
+        let step = compile_event(&event("fill", "Search", Some(TEACH_KEYWORD)), 1, 7)
+            .unwrap()
+            .unwrap();
 
         assert!(step.safe_for_deterministic_replay);
         assert_eq!(step.args["value"], TEACH_KEYWORD);
@@ -325,12 +316,7 @@ mod tests {
 
     #[test]
     fn arbitrary_typed_values_are_not_compiled() {
-        let result = compile_event(
-            &event("fill", "Address", Some("private value")),
-            1,
-            7,
-        )
-        .unwrap();
+        let result = compile_event(&event("fill", "Address", Some("private value")), 1, 7).unwrap();
         assert!(result.is_none());
     }
 
