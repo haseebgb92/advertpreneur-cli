@@ -1,4 +1,3 @@
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -91,10 +90,19 @@ pub struct ToolResult {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ModelEvent {
-    Text { text: String },
-    ReasoningSummary { text: String },
-    ToolCall { call: ToolCall },
-    Usage { input_tokens: u64, output_tokens: u64 },
+    Text {
+        text: String,
+    },
+    ReasoningSummary {
+        text: String,
+    },
+    ToolCall {
+        call: ToolCall,
+    },
+    Usage {
+        input_tokens: u64,
+        output_tokens: u64,
+    },
     Done,
 }
 
