@@ -1,5 +1,6 @@
 param(
     [string]$InstallRoot = "$env:LOCALAPPDATA\Advertpreneur\Unchained",
+    [string]$UnchainedHome = "$env:USERPROFILE\.codex-unchained",
     [switch]$AddToPath
 )
 
@@ -17,17 +18,50 @@ foreach ($required in @($CodexSource, $McpSource, $ExtensionSource)) {
 }
 
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $UnchainedHome | Out-Null
+
 Copy-Item -Force $CodexSource (Join-Path $InstallRoot "codex-unchained.exe")
 Copy-Item -Force $McpSource (Join-Path $InstallRoot "adp-mcp.exe")
-Copy-Item -Recurse -Force $ExtensionSource (Join-Path $InstallRoot "extension")
+
+$InstalledExtension = Join-Path $InstallRoot "extension"
+if (Test-Path $InstalledExtension) {
+    Remove-Item $InstalledExtension -Recurse -Force
+}
+Copy-Item -Recurse -Force $ExtensionSource $InstalledExtension
 
 $mcpPath = (Join-Path $InstallRoot "adp-mcp.exe").Replace("\", "\\")
+$configPath = Join-Path $UnchainedHome "config.toml"
+
+if (-not (Test-Path $configPath)) {
+    @"
+# Codex Unchained owns this config. Normal Codex continues to use ~/.codex/config.toml.
+oss_provider = "ollama"
+
+[mcp_servers.adp]
+command = "$mcpPath"
+startup_timeout_sec = 20
+"@ | Set-Content -Path $configPath -Encoding UTF8
+} else {
+    $currentConfig = Get-Content $configPath -Raw
+    if ($currentConfig -notmatch '(?m)^oss_provider\s*=') {
+        Add-Content -Path $configPath -Value "`r`noss_provider = `"ollama`""
+    }
+    if ($currentConfig -notmatch '(?m)^\[mcp_servers\.adp\]\s*$') {
+        @"
+
+[mcp_servers.adp]
+command = "$mcpPath"
+startup_timeout_sec = 20
+"@ | Add-Content -Path $configPath -Encoding UTF8
+    }
+}
+
 $snippet = @"
 [mcp_servers.adp]
 command = "$mcpPath"
 startup_timeout_sec = 20
 "@
-$snippetPath = Join-Path $InstallRoot "CODEX-MCP-CONFIG.toml"
+$snippetPath = Join-Path $InstallRoot "CODEX-UNCHAINED-MCP-CONFIG.toml"
 Set-Content -Path $snippetPath -Value $snippet -Encoding UTF8
 
 if ($AddToPath) {
@@ -40,17 +74,25 @@ if ($AddToPath) {
 }
 
 Write-Host ""
-Write-Host "Patched Codex installed as:"
+Write-Host "Codex Unchained installed as:"
 Write-Host "  $(Join-Path $InstallRoot "codex-unchained.exe")"
+Write-Host ""
+Write-Host "Dedicated Unchained home:"
+Write-Host "  $UnchainedHome"
+Write-Host ""
+Write-Host "Unchained config:"
+Write-Host "  $configPath"
+Write-Host ""
+Write-Host "Normal Codex remains separate at:"
+Write-Host "  $(Join-Path $env:USERPROFILE ".codex")"
 Write-Host ""
 Write-Host "ADP MCP bridge:"
 Write-Host "  $(Join-Path $InstallRoot "adp-mcp.exe")"
 Write-Host ""
 Write-Host "Load this unpacked extension in Chrome/Edge:"
-Write-Host "  $(Join-Path $InstallRoot "extension")"
-Write-Host ""
-Write-Host "Copy the block from this file into your Codex config.toml:"
-Write-Host "  $snippetPath"
+Write-Host "  $InstalledExtension"
 Write-Host ""
 Write-Host "Then run:"
-Write-Host "  codex-unchained --oss -m qwen3:1.7b"
+Write-Host "  codex-unchained --oss"
+Write-Host ""
+Write-Host "Inside the TUI use /model to switch models."
