@@ -5,6 +5,7 @@ members = [
   "crates/adp-memory",
   "crates/adp-runtime",
   "crates/adp-browser-bridge",
+  "crates/adp-browser-broker",
 ]
 resolver = "2"
 
@@ -14,9 +15,11 @@ license = "Apache-2.0"
 version = "0.1.0"
 
 [workspace.dependencies]
+axum = "0.8"
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "net"] }
 url = "2"
