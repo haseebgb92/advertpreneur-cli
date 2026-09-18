@@ -1,6 +1,4 @@
-use adp_agent::{
-    AgentRuntime, BROWSER_CLICK, BROWSER_FILL, BROWSER_INSPECT, ToolExecutionRecord,
-};
+use adp_agent::{AgentRuntime, BROWSER_CLICK, BROWSER_FILL, BROWSER_INSPECT, ToolExecutionRecord};
 use adp_browser_broker::{BrokerState, serve};
 use adp_executor::{ReplayOutcome, WorkflowExecutor, verify_repair_candidate};
 use adp_memory::{ProjectMemory, SemanticTarget, TEACH_KEYWORD, WorkflowRepair, WorkflowStep};
@@ -196,10 +194,7 @@ async fn chat(args: ChatArgs) -> Result<(), Box<dyn Error>> {
     }
     eprintln!(
         "model_turns={} tool_calls={} input_tokens={} output_tokens={}",
-        result.model_turns,
-        result.tool_calls,
-        result.input_tokens,
-        result.output_tokens
+        result.model_turns, result.tool_calls, result.input_tokens, result.output_tokens
     );
     Ok(())
 }
@@ -561,7 +556,9 @@ fn record_repair_usage(
         stats.local_model_assists = stats.local_model_assists.saturating_add(1);
     }
     stats.model_input_tokens = stats.model_input_tokens.saturating_add(repair.input_tokens);
-    stats.model_output_tokens = stats.model_output_tokens.saturating_add(repair.output_tokens);
+    stats.model_output_tokens = stats
+        .model_output_tokens
+        .saturating_add(repair.output_tokens);
     memory.save_run_stats(workflow_name, &stats)?;
     Ok(())
 }
@@ -635,9 +632,9 @@ async fn wait_for_browser(
 
         if Instant::now() >= deadline {
             let message = match requested_provider {
-                Some(provider) => format!(
-                    "browser provider '{provider}' did not connect before the timeout"
-                ),
+                Some(provider) => {
+                    format!("browser provider '{provider}' did not connect before the timeout")
+                }
                 None => "no ADP browser extension connected before the timeout".to_string(),
             };
             return Err(message.into());
