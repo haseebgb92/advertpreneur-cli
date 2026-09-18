@@ -102,7 +102,7 @@ jobs:
         run: |
           $exe = Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs\target\release\codex.exe"
           & $exe --version
-          & $exe --help | Select-Object -First 40
+          $help = (& $exe --help | Out-String)\n          if ($help -notmatch "Usage: codex-unchained") { throw "Unchained command identity smoke failed" }\n          $help | Select-Object -First 40
 
       - name: Assemble patched Codex artifact
         shell: pwsh
