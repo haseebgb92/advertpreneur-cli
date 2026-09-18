@@ -264,7 +264,7 @@ impl<'a> WorkflowExecutor<'a> {
         observed_signature: Option<String>,
         expected_signature: Option<String>,
     ) -> ReplayOutcome {
-        stats.local_model_assists += 1;
+        stats.divergences += 1;
         let _ = self.memory.save_run_stats(&workflow.name, &stats);
 
         ReplayOutcome::NeedsRepair {
@@ -279,10 +279,10 @@ impl<'a> WorkflowExecutor<'a> {
         }
     }
 
-    fn load_stats(&self, _workflow_name: &str) -> RunStats {
-        // ProjectMemory intentionally exposes writes first. Reading/merging the ledger
-        // is added with the repair learner so concurrent executors can update atomically.
-        RunStats::default()
+    fn load_stats(&self, workflow_name: &str) -> RunStats {
+        self.memory
+            .load_run_stats(workflow_name)
+            .unwrap_or_default()
     }
 }
 
