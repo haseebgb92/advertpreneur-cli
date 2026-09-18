@@ -223,20 +223,16 @@ impl<'a> AgentRuntime<'a> {
                     .get("max_results")
                     .and_then(Value::as_u64)
                     .map(|value| value.min(u32::MAX as u64) as u32);
-                return Ok(serde_json::to_value(
-                    web.search(&query, max_results).await?,
-                )
-                .expect("web search response is serializable"));
+                return Ok(serde_json::to_value(web.search(&query, max_results).await?)
+                    .expect("web search response is serializable"));
             }
             WEB_FETCH => {
                 let web = self
                     .web_client
                     .ok_or_else(|| AgentError::WebUnavailable(call.name.clone()))?;
                 let url = required_string(call, "url")?;
-                return Ok(
-                    serde_json::to_value(web.fetch(&url).await?)
-                        .expect("web fetch response is serializable"),
-                );
+                return Ok(serde_json::to_value(web.fetch(&url).await?)
+                    .expect("web fetch response is serializable"));
             }
             _ => {}
         }
