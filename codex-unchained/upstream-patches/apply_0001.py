@@ -26,11 +26,9 @@ FUNCTION_OLD = """            } => {
 """
 FUNCTION_NEW = """            } => {
                 let tool_name = ToolName::new(namespace, name).with_default_namespace();
-                if tool_name.is_default_namespace()
-                    && tool_name.name == TOOL_SEARCH_TOOL_NAME
-                {
-                    let arguments: SearchToolCallParams =
-                        serde_json::from_str(&arguments).map_err(|err| {
+                if tool_name.is_default_namespace() && tool_name.name == TOOL_SEARCH_TOOL_NAME {
+                    let arguments: SearchToolCallParams = serde_json::from_str(&arguments)
+                        .map_err(|err| {
                             FunctionCallError::RespondToModel(format!(
                                 "failed to parse tool_search arguments: {err}"
                             ))
