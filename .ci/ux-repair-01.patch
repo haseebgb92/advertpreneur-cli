@@ -1,0 +1,176 @@
+@@ -2127,9 +2154,16 @@
+             match saved_login_fast_path(browser, &url).await {
+                 Ok(msg) => {
+                     let validations = vec!["browser action verified".into()];
+-                    println!(
+-                        "{msg}\nlocal fast-path · 0 model requests · 0 tokens · {:.2}s",
+-                        started.elapsed().as_secs_f32()
++                    ui::event("Browser", "saved-login fast path verified", Some(true));
++                    ui::end_task();
++                    ui::result_card(
++                        &msg,
++                        &[],
++                        0,
++                        &validations,
++                        "local",
++                        "browser-fast-path",
++                        started.elapsed().as_secs_f32(),
+                     );
+                     record_task(paths, task, &msg, vec![], validations.clone(), vec![])?;
+                     let _ = record_adaptive_learnings(paths, task, &route, &[], &validations);
+@@ -2142,15 +2176,20 @@
+                         ..Default::default()
+                     });
+                 }
+-                Err(e) => println!(
+-                    "Local browser path unavailable · {e} · escalating with compact context"
++                Err(e) => ui::event(
++                    "Browser",
++                    &format!("local fast path unavailable · {e} · escalating"),
++                    Some(false),
+                 ),
+             }
+         }
+     }
++    ui::set_working("preparing task", "refreshing local project context");
+     let _ = refresh_index(paths, false);
+     let checkpoint = if task_may_mutate(task, &route) {
+-        Some(create_checkpoint(paths, task)?)
++        let cp = create_checkpoint(paths, task)?;
++        ui::event("Checkpoint", "safety snapshot created", Some(true));
++        Some(cp)
+     } else {
+         None
+     };
+@@ -2186,13 +2225,14 @@
+         route: route.clone(),
+         max_output_tokens: 4096,
+     };
++    ui::set_working("thinking", "selecting provider and next action");
+     let initial_run =
+         run_with_escalation(paths, browser, &req, provider, model, checkpoint.as_ref()).await?;
+     let initial_provider = initial_run.response.provider.clone();
+     let initial_model = initial_run.response.model.clone();
+     let initial_duration_ms = initial_run.duration_ms;
+     let mut result = initial_run.response;
+-    println!("\n{}", result.text.trim());
++    ui::set_working("verifying", "checking task result");
+     let mutated = match checkpoint.as_ref() {
+         Some(cp) => !checkpoint_matches_live(paths, cp)?,
+         None => false,
+@@ -2210,6 +2250,7 @@
+         };
+         let _ = record_verification_learning(paths, &route, &current, &report);
+         if report.ok {
++            ui::event("Verify", "no new regressions", Some(true));
+             record_provider_outcome(
+                 paths,
+                 &route,
+@@ -2228,6 +2269,7 @@
+         } else if let (Some(cp), Some(baseline)) =
+             (checkpoint.as_ref(), baseline_verification.as_ref())
+         {
++            ui::event("Verify", "regression detected · starting bounded repair", Some(false));
+             record_provider_outcome(
+                 paths,
+                 &route,
+@@ -2267,14 +2309,19 @@
+         )?;
+     }
+     let changed = changed_files_git(&paths.project);
++    ui::end_task();
++    ui::result_card(
++        &result.text,
++        &changed,
++        result.tool_calls,
++        &validations,
++        &result.provider,
++        &result.model,
++        started.elapsed().as_secs_f32(),
++    );
+     println!(
+-        "\n{} {} · {} in · {} cached · {} out · {:.1}s",
+-        result.provider,
+-        result.model,
+-        result.input_tokens,
+-        result.cached_tokens,
+-        result.output_tokens,
+-        started.elapsed().as_secs_f32()
++        "    Tokens · {} in · {} cached · {} out",
++        result.input_tokens, result.cached_tokens, result.output_tokens
+     );
+     record_task(
+         paths,
+@@ -2532,6 +2579,10 @@
+     }
+     for choice in candidates {
+         let started = std::time::Instant::now();
++        ui::set_working(
++            "thinking",
++            &format!("{}{}", choice.provider, if choice.model.is_empty() { String::new() } else { format!("/{}", choice.model) }),
++        );
+         let isolated = paths
+             .sessions
+             .join(format!("reasoning-{}", choice.provider));
+@@ -2575,6 +2626,11 @@
+                 });
+             }
+             Err(e) => {
++                ui::event(
++                    "Provider",
++                    &format!("{} failed · trying safe fallback when allowed", choice.provider),
++                    Some(false),
++                );
+                 let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                 let error = e.to_string();
+                 let _ = record_runtime_failure(paths, &choice.provider, &choice.model, &error);
+--- /dev/null
++++ b/crates/adp-cli/src/ui.rs
+@@ -0,0 +1,396 @@
++use serde_json::Value;
++use std::{
++    io::{self, IsTerminal, Write},
++    sync::{
++        atomic::{AtomicBool, Ordering},
++        Arc, Mutex, OnceLock,
++    },
++    thread,
++    time::{Duration, Instant},
++};
++
++const ORANGE: &str = "\x1b[38;2;243;161;38m";
++const MUTED: &str = "\x1b[38;2;138;143;152m";
++const GREEN: &str = "\x1b[38;2;66;184;131m";
++const RED: &str = "\x1b[38;2;239;107;115m";
++const BLUE: &str = "\x1b[38;2;96;165;250m";
++const PURPLE: &str = "\x1b[38;2;188;140;255m";
++const PINK: &str = "\x1b[38;2;247;120;186m";
++const RESET: &str = "\x1b[0m";
++
++#[derive(Debug)]
++struct LiveState {
++    active: bool,
++    started: Instant,
++    label: String,
++    detail: String,
++    provider: String,
++    model: String,
++}
++
++impl Default for LiveState {
++    fn default() -> Self {
++        Self {
++            active: false,
++            started: Instant::now(),
++            label: "working".into(),
++            detail: String::new(),
++            provider: String::new(),
++            model: String::new(),
++        }
++    }
++}
++
++struct Runtime {
++    state: Mutex<LiveState>,
++    write_lock: Mutex<()>,
++
