@@ -55,7 +55,13 @@ jobs:
           "ADP_RUST_SRC=$src" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Compile harness restored and checksum verified."
 
-      - name: Cargo fmt
+      - name: Apply canonical Rust formatting
+        shell: pwsh
+        run: |
+          Set-Location $env:ADP_RUST_SRC
+          cargo fmt
+
+      - name: Verify Rust formatting
         shell: pwsh
         run: |
           Set-Location $env:ADP_RUST_SRC
@@ -90,4 +96,14 @@ jobs:
         with:
           name: adp-windows-validation
           path: ${{ env.ADP_RUST_SRC }}\target\release\adp.exe
+          if-no-files-found: error
+
+      - name: Upload canonical formatted Rust source
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adp-rust-formatted-source
+          path: |
+            ${{ env.ADP_RUST_SRC }}\Cargo.toml
+            ${{ env.ADP_RUST_SRC }}\crates
           if-no-files-found: error
