@@ -10,7 +10,7 @@ use adp_web::WebClient;
 use serde_json::{Value, json};
 use std::error::Error;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::TcpListener;
 use tokio::time::{Instant, sleep};
 
@@ -72,9 +72,11 @@ async fn run_stdio(broker: BrokerState, web: WebClient) -> Result<(), Box<dyn Er
 
 async fn write_message<W>(writer: &mut W, message: &Value) -> Result<(), std::io::Error>
 where
-    W: AsyncWriteExt + Unpin,
+    W: AsyncWrite + Unpin,
 {
-    writer.write_all(serde_json::to_string(message).unwrap().as_bytes()).await?;
+    writer
+        .write_all(serde_json::to_string(message).unwrap().as_bytes())
+        .await?;
     writer.write_all(b"\n").await?;
     writer.flush().await
 }
@@ -173,7 +175,10 @@ async fn call_tool(
         .get("name")
         .and_then(Value::as_str)
         .ok_or_else(|| (-32602, "tools/call name must be text".to_string()))?;
-    let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+    let arguments = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
 
     let result = match name {
         WEB_SEARCH => {
@@ -354,13 +359,9 @@ mod tests {
     async fn tools_list_exposes_browser_and_web_to_codex() {
         let broker = BrokerState::new();
         let web = WebClient::from_env().unwrap();
-        let response = handle_request(
-            &broker,
-            &web,
-            request(2, "tools/list", json!({})),
-        )
-        .await
-        .unwrap();
+        let response = handle_request(&broker, &web, request(2, "tools/list", json!({})))
+            .await
+            .unwrap();
 
         let names = response["result"]["tools"]
             .as_array()
