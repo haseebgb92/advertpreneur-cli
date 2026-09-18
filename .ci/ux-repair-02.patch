@@ -1,0 +1,176 @@
++    stop: AtomicBool,
++    handle: Mutex<Option<thread::JoinHandle<()>>>,
++    styled: bool,
++}
++
++static RUNTIME: OnceLock<Arc<Runtime>> = OnceLock::new();
++
++fn runtime() -> &'static Arc<Runtime> {
++    RUNTIME.get_or_init(|| {
++        let styled = io::stdout().is_terminal()
++            && std::env::var_os("NO_COLOR").is_none()
++            && enable_terminal_styling();
++        Arc::new(Runtime {
++            state: Mutex::new(LiveState::default()),
++            write_lock: Mutex::new(()),
++            stop: AtomicBool::new(false),
++            handle: Mutex::new(None),
++            styled,
++        })
++    })
++}
++
++#[cfg(not(windows))]
++fn enable_terminal_styling() -> bool {
++    true
++}
++
++#[cfg(windows)]
++fn enable_terminal_styling() -> bool {
++    use std::ffi::c_void;
++    const STD_OUTPUT_HANDLE: i32 = -11;
++    const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
++    extern "system" {
++        fn GetStdHandle(n_std_handle: i32) -> *mut c_void;
++        fn GetConsoleMode(h_console_handle: *mut c_void, lp_mode: *mut u32) -> i32;
++        fn SetConsoleMode(h_console_handle: *mut c_void, dw_mode: u32) -> i32;
++    }
++    unsafe {
++        let handle = GetStdHandle(STD_OUTPUT_HANDLE);
++        if handle.is_null() || handle as isize == -1 {
++            return false;
++        }
++        let mut mode = 0u32;
++        if GetConsoleMode(handle, &mut mode as *mut u32) == 0 {
++            return false;
++        }
++        SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0
++    }
++}
++
++fn paint<'a>(rt: &Runtime, color: &'a str, text: &'a str) -> String {
++    if rt.styled {
++        format!("{color}{text}{RESET}")
++    } else {
++        text.to_string()
++    }
++}
++
++fn pad_clear(rt: &Runtime) {
++    let mut out = io::stdout().lock();
++    if rt.styled {
++        let _ = write!(out, "\r\x1b[2K");
++    } else {
++        let _ = write!(out, "\r{: <140}\r", "");
++    }
++    let _ = out.flush();
++}
++
++fn state_line(rt: &Runtime, state: &LiveState) -> String {
++    let elapsed = state.started.elapsed().as_secs_f32();
++    let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
++    let frame = frames[((elapsed * 10.0) as usize) % frames.len()];
++    let mut text = format!(" {frame} {}", state.label);
++    if !state.detail.is_empty() {
++        text.push_str(" · ");
++        text.push_str(&state.detail);
++    }
++    text.push_str(&format!(" · {elapsed:.1}s"));
++    if !state.provider.is_empty() {
++        text.push_str(" · ");
++        text.push_str(&state.provider);
++        if !state.model.is_empty() {
++            text.push('/');
++            text.push_str(&state.model);
++        }
++    }
++    text
++}
++
++fn render_live(rt: &Runtime) {
++    let _guard = rt.write_lock.lock().unwrap_or_else(|e| e.into_inner());
++    let state = rt.state.lock().unwrap_or_else(|e| e.into_inner());
++    if !state.active {
++        return;
++    }
++    let line = state_line(rt, &state);
++    let mut out = io::stdout().lock();
++    if rt.styled {
++        let _ = write!(out, "\r\x1b[2K{}", paint(rt, MUTED, &line));
++    } else {
++        let _ = write!(out, "\r{: <140}\r{}", "", line);
++    }
++    let _ = out.flush();
++}
++
++pub fn banner(version: &str, project: &std::path::Path) {
++    let rt = runtime();
++    let _guard = rt.write_lock.lock().unwrap_or_else(|e| e.into_inner());
++    let brand = paint(rt, ORANGE, "ADVERTPRENEUR CLI");
++    let ver = paint(rt, MUTED, &format!("v{version} · Rust"));
++    let project_label = paint(rt, MUTED, "Project");
++    let help = if rt.styled {
++        format!(
++            "{} {} {} {} {}",
++            paint(rt, MUTED, "Type"),
++            paint(rt, ORANGE, "/"),
++            paint(rt, MUTED, "commands ·"),
++            paint(rt, PINK, "!"),
++            paint(rt, MUTED, "shell · Ctrl+C stop task")
++        )
++    } else {
++        "Type / commands · ! shell".into()
++    };
++    println!();
++    println!("  {brand}  {ver}");
++    println!("  {project_label}  {}", project.display());
++    println!("  {help}");
++    println!();
++}
++
++pub fn prompt(provider: &str, model: &str, browser_connected: bool, resource: &str) -> io::Result<()> {
++    let rt = runtime();
++    let _guard = rt.write_lock.lock().unwrap_or_else(|e| e.into_inner());
++    let provider_text = if model.trim().is_empty() {
++        provider.to_string()
++    } else {
++        format!("{provider}/{model}")
++    };
++    let browser = if browser_connected {
++        paint(rt, GREEN, "browser connected")
++    } else {
++        paint(rt, MUTED, "browser waiting")
++    };
++    let resource = if resource.eq_ignore_ascii_case("green") {
++        paint(rt, GREEN, "GREEN")
++    } else {
++        paint(rt, ORANGE, resource)
++    };
++    println!(
++        "  {} · {} · {}",
++        paint(rt, ORANGE, &provider_text),
++        browser,
++        resource
++    );
++    println!("  {}", paint(rt, MUTED, "╭─ Message Advertpreneur ─"));
++    print!("  {} ", paint(rt, ORANGE, "›"));
++    io::stdout().flush()
++}
++
++pub fn begin_task(provider: &str, model: &str, label: &str, detail: &str) {
++    end_task();
++    let rt = Arc::clone(runtime());
++    {
++        let mut state = rt.state.lock().unwrap_or_else(|e| e.into_inner());
++        state.active = true;
++        state.started = Instant::now();
++        state.label = label.to_string();
++        state.detail = detail.chars().take(180).collect();
++        state.provider = provider.to_string();
++        state.model = model.to_string();
++    }
++    rt.stop.store(false, Ordering::Release);
++    render_live(&rt);
++    let thread_rt = Arc::clone(&rt);
++    let handle = thread::spawn(move || {
++
