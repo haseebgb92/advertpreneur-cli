@@ -79,7 +79,7 @@ jobs:
           $patch = Join-Path $env:RUNNER_TEMP "adp-ux-repair.patch"
           [IO.File]::WriteAllText($patch, $patchText, [Text.UTF8Encoding]::new($false))
           $hash = (Get-FileHash $patch -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($hash -ne "7275e3d5892a1a670992dda32592679bc07cbc30460f8542cbe811b3489a13f8") {
+          if ($hash -ne "6434d75cee0560419b4475a8643a586e31516023994b2e783638d54c6e8b17e6") {
             throw "UX repair patch checksum mismatch: $hash"
           }
           Set-Location $env:ADP_RUST_SRC
