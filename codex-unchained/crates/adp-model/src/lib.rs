@@ -3,6 +3,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::env;
+use std::process::Command;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -140,6 +141,154 @@ pub enum ModelError {
     ProviderHttp { status: u16, body: String },
     #[error("model provider returned invalid payload: {0}")]
     InvalidPayload(String),
+    #[error("provider command {program:?} failed to start: {source}")]
+    CommandStart {
+        program: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("provider command {program:?} failed with status {status}: {stderr}")]
+    CommandFailed {
+        program: String,
+        status: String,
+        stderr: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AntigravityModel {
+    pub slug: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AntigravityUsage {
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+    #[serde(default)]
+    pub thinking_tokens: u64,
+    #[serde(default)]
+    pub cache_read_tokens: u64,
+    #[serde(default)]
+    pub total_tokens: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AntigravityResponse {
+    #[serde(default)]
+    pub conversation_id: String,
+    pub status: String,
+    #[serde(default)]
+    pub response: String,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub usage: AntigravityUsage,
+}
+
+#[derive(Debug, Clone)]
+pub struct AntigravityClient {
+    program: String,
+}
+
+impl Default for AntigravityClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AntigravityClient {
+    pub fn new() -> Self {
+        Self {
+            program: "agy".to_string(),
+        }
+    }
+
+    pub fn with_program(program: impl Into<String>) -> Self {
+        Self {
+            program: program.into(),
+        }
+    }
+
+    pub fn list_models(&self) -> Result<Vec<AntigravityModel>, ModelError> {
+        let output = Command::new(&self.program)
+            .arg("models")
+            .output()
+            .map_err(|source| ModelError::CommandStart {
+                program: self.program.clone(),
+                source,
+            })?;
+        if !output.status.success() {
+            return Err(ModelError::CommandFailed {
+                program: self.program.clone(),
+                status: output.status.to_string(),
+                stderr: truncate(&String::from_utf8_lossy(&output.stderr), 2_000),
+            });
+        }
+
+        Ok(parse_antigravity_models(&String::from_utf8_lossy(
+            &output.stdout,
+        )))
+    }
+
+    pub fn chat_text(
+        &self,
+        model: &str,
+        prompt: &str,
+    ) -> Result<AntigravityResponse, ModelError> {
+        let output = Command::new(&self.program)
+            .args([
+                "-p",
+                prompt,
+                "--model",
+                model,
+                "--output-format",
+                "json",
+            ])
+            .output()
+            .map_err(|source| ModelError::CommandStart {
+                program: self.program.clone(),
+                source,
+            })?;
+        if !output.status.success() {
+            return Err(ModelError::CommandFailed {
+                program: self.program.clone(),
+                status: output.status.to_string(),
+                stderr: truncate(&String::from_utf8_lossy(&output.stderr), 2_000),
+            });
+        }
+
+        serde_json::from_slice::<AntigravityResponse>(&output.stdout)
+            .map_err(|err| ModelError::InvalidPayload(err.to_string()))
+    }
+}
+
+pub fn parse_antigravity_models(output: &str) -> Vec<AntigravityModel> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            let mut parts = line.split_whitespace();
+            let slug = parts.next()?;
+            let label = parts.collect::<Vec<_>>().join(" ");
+            if label.is_empty()
+                || !slug
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':'))
+            {
+                return None;
+            }
+            Some(AntigravityModel {
+                slug: slug.to_string(),
+                label,
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -383,6 +532,34 @@ mod tests {
         let wire = serde_json::to_string(&message).unwrap();
         let parsed: ChatMessage = serde_json::from_str(&wire).unwrap();
         assert_eq!(parsed, message);
+    }
+
+    #[test]
+    fn antigravity_model_listing_parser_keeps_slug_and_label() {
+        let models = parse_antigravity_models(
+            "gemini-3.8-flash-high     Gemini 3.8 Flash (High)\n\
+             claude-sonnet-4-6         Claude Sonnet 4.6 (Thinking)\n",
+        );
+        assert_eq!(
+            models,
+            vec![
+                AntigravityModel {
+                    slug: "gemini-3.8-flash-high".to_string(),
+                    label: "Gemini 3.8 Flash (High)".to_string(),
+                },
+                AntigravityModel {
+                    slug: "claude-sonnet-4-6".to_string(),
+                    label: "Claude Sonnet 4.6 (Thinking)".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn antigravity_model_listing_parser_ignores_headings_and_blank_lines() {
+        let models = parse_antigravity_models("Available models:\n\nslug-one Model One\n");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].slug, "slug-one");
     }
 
     #[test]
