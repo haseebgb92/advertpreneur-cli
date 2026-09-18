@@ -32,6 +32,12 @@ replace_once(
     'Ok(Self{directory,runs_path:paths.missions.join("runs.jsonl")})',
     "MissionStore constructor project field",
 )
+replace_once(
+    core,
+    "#[cfg(test)]\nmod tests {\n    use super::*;\n",
+    "#[cfg(test)]\nmod tests {\n    use super::*;\n    use std::io::Write;\n",
+    "test-only zip Write import",
+)
 
 models = root/"crates/adp-models/src/lib.rs"
 text = models.read_text(encoding="utf-8")
