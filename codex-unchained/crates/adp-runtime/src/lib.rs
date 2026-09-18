@@ -44,18 +44,11 @@ pub struct ExecutionDecision {
     pub reason: &'static str,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ExecutionPlanner {
     pub budget: ExecutionBudget,
 }
 
-impl Default for ExecutionPlanner {
-    fn default() -> Self {
-        Self {
-            budget: ExecutionBudget::default(),
-        }
-    }
-}
 
 impl ExecutionPlanner {
     pub fn decide(&self, input: &PlannerInput) -> ExecutionDecision {
