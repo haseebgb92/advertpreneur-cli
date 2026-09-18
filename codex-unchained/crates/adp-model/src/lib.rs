@@ -53,6 +53,7 @@ impl OllamaConfig {
         if self.transport == OllamaTransport::Local {
             return Ok(None);
         }
+
         let name = self.api_key_env.as_deref().unwrap_or("OLLAMA_API_KEY");
         let value = env::var(name).map_err(|_| ModelError::MissingCredential(name.to_string()))?;
         if value.trim().is_empty() {
@@ -62,31 +63,61 @@ impl OllamaConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatFunctionCall {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
+    pub name: String,
+    #[serde(default)]
+    pub arguments: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatToolCall {
+    #[serde(rename = "type", default = "function_type")]
+    pub kind: String,
+    pub function: ChatFunctionCall,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ChatToolCall>,
 }
 
 impl ChatMessage {
     pub fn system(content: impl Into<String>) -> Self {
-        Self {
-            role: "system".to_string(),
-            content: content.into(),
-        }
+        Self::plain("system", content)
     }
 
     pub fn user(content: impl Into<String>) -> Self {
-        Self {
-            role: "user".to_string(),
-            content: content.into(),
-        }
+        Self::plain("user", content)
     }
 
     pub fn assistant(content: impl Into<String>) -> Self {
+        Self::plain("assistant", content)
+    }
+
+    pub fn tool(tool_name: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
-            role: "assistant".to_string(),
+            role: "tool".to_string(),
             content: content.into(),
+            tool_name: Some(tool_name.into()),
+            tool_calls: Vec::new(),
+        }
+    }
+
+    fn plain(role: &str, content: impl Into<String>) -> Self {
+        Self {
+            role: role.to_string(),
+            content: content.into(),
+            tool_name: None,
+            tool_calls: Vec::new(),
         }
     }
 }
@@ -94,6 +125,7 @@ impl ChatMessage {
 #[derive(Debug, Clone)]
 pub struct ModelResponse {
     pub events: Vec<ModelEvent>,
+    pub assistant_message: ChatMessage,
     pub assistant_text: String,
     pub tool_calls: Vec<ToolCall>,
 }
@@ -215,31 +247,11 @@ struct OllamaChatRequest {
 
 #[derive(Debug, Deserialize)]
 struct OllamaChatResponse {
-    message: OllamaMessage,
+    message: ChatMessage,
     #[serde(default)]
     prompt_eval_count: Option<u64>,
     #[serde(default)]
     eval_count: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OllamaMessage {
-    #[serde(default)]
-    content: String,
-    #[serde(default)]
-    tool_calls: Vec<OllamaToolCall>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OllamaToolCall {
-    function: OllamaFunctionCall,
-}
-
-#[derive(Debug, Deserialize)]
-struct OllamaFunctionCall {
-    name: String,
-    #[serde(default)]
-    arguments: Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -265,19 +277,22 @@ fn tool_to_ollama(tool: &ToolDescriptor) -> Value {
 }
 
 fn normalize_response(payload: OllamaChatResponse) -> ModelResponse {
+    let assistant_message = payload.message;
+    let assistant_text = assistant_message.content.clone();
+
     let mut events = Vec::new();
-    if !payload.message.content.is_empty() {
+    if !assistant_text.is_empty() {
         events.push(ModelEvent::Text {
-            text: payload.message.content.clone(),
+            text: assistant_text.clone(),
         });
     }
 
     let mut tool_calls = Vec::new();
-    for raw in payload.message.tool_calls {
+    for raw in &assistant_message.tool_calls {
         let call = ToolCall {
             id: format!("ollama-{}", Uuid::new_v4()),
-            name: raw.function.name,
-            arguments: raw.function.arguments,
+            name: raw.function.name.clone(),
+            arguments: raw.function.arguments.clone(),
         };
         events.push(ModelEvent::ToolCall { call: call.clone() });
         tool_calls.push(call);
@@ -293,9 +308,14 @@ fn normalize_response(payload: OllamaChatResponse) -> ModelResponse {
 
     ModelResponse {
         events,
-        assistant_text: payload.message.content,
+        assistant_message,
+        assistant_text,
         tool_calls,
     }
+}
+
+fn function_type() -> String {
+    "function".to_string()
 }
 
 fn truncate(value: &str, max: usize) -> String {
@@ -321,7 +341,7 @@ mod tests {
     #[test]
     fn tool_schema_is_provider_neutral_until_serialization() {
         let tool = ToolDescriptor {
-            name: "adp.browser.inspect".to_string(),
+            name: "adp_browser_inspect".to_string(),
             description: "Inspect the current browser state".to_string(),
             capability: Capability::Browser,
             input_schema: json!({
@@ -332,11 +352,37 @@ mod tests {
             deterministic_safe: true,
         };
         let serialized = tool_to_ollama(&tool);
-        assert_eq!(serialized["function"]["name"], "adp.browser.inspect");
-        assert_eq!(
-            serialized["function"]["parameters"]["type"],
-            "object"
-        );
+        assert_eq!(serialized["function"]["name"], "adp_browser_inspect");
+        assert_eq!(serialized["function"]["parameters"]["type"], "object");
+    }
+
+    #[test]
+    fn tool_result_message_matches_ollama_agent_loop_wire_shape() {
+        let message = ChatMessage::tool("adp_browser_inspect", r#"{"ok":true}"#);
+        let json = serde_json::to_value(message).unwrap();
+        assert_eq!(json["role"], "tool");
+        assert_eq!(json["tool_name"], "adp_browser_inspect");
+        assert_eq!(json["content"], r#"{"ok":true}"#);
+    }
+
+    #[test]
+    fn assistant_tool_calls_round_trip_without_provider_specific_agent_state() {
+        let message = ChatMessage {
+            role: "assistant".to_string(),
+            content: String::new(),
+            tool_name: None,
+            tool_calls: vec![ChatToolCall {
+                kind: "function".to_string(),
+                function: ChatFunctionCall {
+                    index: Some(0),
+                    name: "adp_browser_inspect".to_string(),
+                    arguments: json!({}),
+                },
+            }],
+        };
+        let wire = serde_json::to_string(&message).unwrap();
+        let parsed: ChatMessage = serde_json::from_str(&wire).unwrap();
+        assert_eq!(parsed, message);
     }
 
     #[test]
