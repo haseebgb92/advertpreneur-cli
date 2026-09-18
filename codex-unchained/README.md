@@ -113,7 +113,7 @@ Potentially consequential clicks are learned but are not marked safe for determi
 
 `upstream-patches/` pins an exact OpenAI Codex revision and contains reproducible source transformations that:
 
-1. normalize compatible providers that emit `tool_search` as an ordinary function call into Codex's client-side tool-search payload;
+1. accept `tool_search` from compatible providers as an ordinary function call and return its result as a matching function-call output, while preserving native Codex's specialized tool-search wire format;
 2. stop unknown/custom model fallback metadata from automatically disabling local tool discovery and skill/plugin/app guidance.
 
 `.github/workflows/codex-upstream-compat.yml` fetches the pinned upstream revision, applies both transformations, checks formatting, and runs focused upstream Codex tests.
