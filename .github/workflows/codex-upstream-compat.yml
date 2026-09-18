@@ -43,9 +43,15 @@ jobs:
           cargo fmt --all -- --check
       - name: Show exact upstream diff
         run: |
-          git -C /tmp/codex diff --             codex-rs/core/src/tools/router.rs             codex-rs/core/src/tools/router_tests.rs             codex-rs/models-manager/src/model_info.rs             codex-rs/models-manager/src/model_info_tests.rs
+          git -C /tmp/codex diff -- \
+            codex-rs/core/src/tools/handlers/tool_search.rs \
+            codex-rs/core/src/tools/context.rs \
+            codex-rs/core/src/tools/context_tests.rs \
+            codex-rs/models-manager/src/model_info.rs \
+            codex-rs/models-manager/src/model_info_tests.rs
       - name: Run focused Codex compatibility tests
         working-directory: /tmp/codex/codex-rs
         run: |
-          cargo test -p codex-core build_tool_call_ --lib
+          cargo test -p codex-core function_tool_search_ --lib
+          cargo test -p codex-core tool_search_payloads_roundtrip_as_tool_search_outputs --lib
           cargo test -p codex-models-manager unknown_model_keeps_local_tool_discovery_and_extension_instructions --lib
