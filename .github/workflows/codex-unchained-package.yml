@@ -1,5 +1,9 @@
 name: Codex Unchained Windows Package
 
+concurrency:
+  group: codex-unchained-package-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:
@@ -17,9 +21,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Build ADP Unchained
+      - name: Build ADP Unchained and Codex MCP bridge
         working-directory: codex-unchained
-        run: cargo build -p adp-unchained --release
+        run: cargo build -p adp-unchained -p adp-mcp --release
 
       - name: Smoke executable
         working-directory: codex-unchained
@@ -28,6 +32,9 @@ jobs:
           .\target\release\adp-unchained.exe --help
           .\target\release\adp-unchained.exe web-search --help
           .\target\release\adp-unchained.exe replay --help
+          $init = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"package-smoke","version":"1"}}}'
+          $mcp = ($init | .\target\release\adp-mcp.exe | Out-String)
+          if ($mcp -notmatch '"serverInfo"') { throw "adp-mcp initialize smoke failed" }
 
       - name: Assemble Windows package
         shell: pwsh
@@ -36,6 +43,7 @@ jobs:
           $dist = Join-Path $root "dist\adp-unchained-windows-x64"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Copy-Item (Join-Path $root "target\release\adp-unchained.exe") $dist
+          Copy-Item (Join-Path $root "target\release\adp-mcp.exe") $dist
           Copy-Item -Recurse (Join-Path $root "extension") (Join-Path $dist "extension")
           Copy-Item (Join-Path $root "README.md") $dist
           Copy-Item (Join-Path $root "INSTALL-WINDOWS.ps1") $dist
@@ -79,11 +87,14 @@ jobs:
           python "codex-unchained\upstream-patches\apply_0002.py" "$env:CODEX_UPSTREAM_ROOT"
           git -C "$env:CODEX_UPSTREAM_ROOT" diff --check
 
-      - name: Build patched Codex CLI
+      - name: Build patched Codex CLI and ADP MCP bridge
         shell: pwsh
         run: |
           Push-Location (Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs")
           cargo build -p codex-cli --release
+          Pop-Location
+          Push-Location (Join-Path $env:GITHUB_WORKSPACE "codex-unchained")
+          cargo build -p adp-mcp --release
           Pop-Location
 
       - name: Smoke patched Codex
@@ -98,7 +109,11 @@ jobs:
         run: |
           $dist = Join-Path $env:GITHUB_WORKSPACE "codex-unchained\dist\patched-codex-windows-x64"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
-          Copy-Item (Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs\target\release\codex.exe") $dist
+          Copy-Item (Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs\target\release\codex.exe") (Join-Path $dist "codex-unchained.exe")
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "codex-unchained\target\release\adp-mcp.exe") $dist
+          Copy-Item -Recurse (Join-Path $env:GITHUB_WORKSPACE "codex-unchained\extension") (Join-Path $dist "extension")
+          Copy-Item "codex-unchained\INSTALL-CODEX-WINDOWS.ps1" $dist
+          Copy-Item "codex-unchained\README.md" $dist
           Copy-Item "codex-unchained\upstream-patches\UPSTREAM_SHA" $dist
           Copy-Item "codex-unchained\docs\UPSTREAM_CODEX_INTEGRATION.md" $dist
           $zip = Join-Path $env:GITHUB_WORKSPACE "codex-unchained\dist\patched-codex-windows-x64.zip"
