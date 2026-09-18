@@ -4,6 +4,7 @@ use adp_executor::{ReplayOutcome, WorkflowExecutor};
 use adp_memory::ProjectMemory;
 use adp_model::{OllamaClient, OllamaConfig, OllamaTransport};
 use adp_protocol::ExecutionContext;
+use adp_teach::{TeachConfig, TeachRecordOutcome, TeachRecorder};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -31,6 +32,8 @@ enum Command {
     Doctor(ModelArgs),
     /// Run a model conversation, optionally with the existing browser as a tool.
     Chat(ChatArgs),
+    /// Record a browser demonstration into an executable .advertpreneur workflow.
+    Teach(TeachArgs),
     /// Replay a learned .advertpreneur workflow without a model when state matches.
     Replay(ReplayArgs),
 }
@@ -65,6 +68,19 @@ struct ChatArgs {
 }
 
 #[derive(Debug, Args)]
+struct TeachArgs {
+    workflow: String,
+    #[arg(long)]
+    project: Option<PathBuf>,
+    #[arg(long)]
+    provider_id: Option<String>,
+    #[arg(long)]
+    tab_id: Option<i64>,
+    #[arg(long, default_value_t = 20)]
+    browser_wait_seconds: u64,
+}
+
+#[derive(Debug, Args)]
 struct ReplayArgs {
     workflow: String,
     #[arg(long)]
@@ -88,6 +104,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Command::Models(args) => list_models(args).await?,
         Command::Doctor(args) => doctor(args).await?,
         Command::Chat(args) => chat(args).await?,
+        Command::Teach(args) => teach(args).await?,
         Command::Replay(args) => replay(args).await?,
     }
 
@@ -166,6 +183,77 @@ async fn chat(args: ChatArgs) -> Result<(), Box<dyn Error>> {
     eprintln!(
         "model_turns={} tool_calls={}",
         result.model_turns, result.tool_calls
+    );
+    Ok(())
+}
+
+async fn teach(args: TeachArgs) -> Result<(), Box<dyn Error>> {
+    let project_root = match args.project {
+        Some(path) => path,
+        None => std::env::current_dir()?,
+    };
+    let memory = ProjectMemory::open(&project_root)?;
+    let broker = BrokerState::new();
+    let listener = bind_broker().await?;
+    let broker_for_server = broker.clone();
+    tokio::spawn(async move {
+        let _ = serve(listener, broker_for_server).await;
+    });
+
+    println!("Waiting for the ADP Chrome/Edge extension...");
+    let provider_id = wait_for_browser(
+        &broker,
+        args.provider_id.as_deref(),
+        Duration::from_secs(args.browser_wait_seconds),
+    )
+    .await?;
+
+    let mut events = broker.subscribe_learn();
+    let mut config = TeachConfig::new(&args.workflow, &provider_id);
+    config.tab_id = args.tab_id;
+    let mut recorder = TeachRecorder::start(&broker, &memory, config).await?;
+
+    println!(
+        "Teaching '{}' on browser tab {}. Demonstrate the workflow, then press Ctrl+C to finish.",
+        args.workflow,
+        recorder.tab_id()
+    );
+
+    loop {
+        tokio::select! {
+            signal = tokio::signal::ctrl_c() => {
+                signal?;
+                break;
+            }
+            event = events.recv() => {
+                match event {
+                    Ok(event) => match recorder.record(event).await? {
+                        TeachRecordOutcome::Ignored => {}
+                        TeachRecordOutcome::Recorded {
+                            step_id,
+                            deterministic_safe,
+                        } => {
+                            println!(
+                                "learned {step_id} deterministic_safe={deterministic_safe}"
+                            );
+                        }
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        eprintln!("teach event stream lagged; skipped {skipped} events");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        return Err("teach event stream closed".into());
+                    }
+                }
+            }
+        }
+    }
+
+    println!(
+        "Saved workflow '{}' with {} steps under {}",
+        recorder.workflow().name,
+        recorder.workflow().steps.len(),
+        memory.root().display()
     );
     Ok(())
 }
