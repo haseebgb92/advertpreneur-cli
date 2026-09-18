@@ -178,8 +178,15 @@ fn model_info(slug: String, display_name: String, description: &str, priority: i
     })
 }
 
-async fn responses(State(state): State<ModelRouterState>, axum::Json(mut request): axum::Json<Value>) -> Response<Body> {
-    let Some(model) = request.get("model").and_then(Value::as_str).map(str::to_string) else {
+async fn responses(
+    State(state): State<ModelRouterState>,
+    axum::Json(mut request): axum::Json<Value>,
+) -> Response<Body> {
+    let Some(model) = request
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
         return json_response(
             StatusCode::BAD_REQUEST,
             json!({"error":{"message":"missing model"}}),
@@ -193,10 +200,7 @@ async fn responses(State(state): State<ModelRouterState>, axum::Json(mut request
 
     if let Some(actual) = model.strip_prefix(OLLAMA_CLOUD_PREFIX) {
         if let Err(error) = ensure_ollama_model(&state.http, actual).await {
-            return json_response(
-                StatusCode::BAD_GATEWAY,
-                json!({"error":{"message": error}}),
-            );
+            return json_response(StatusCode::BAD_GATEWAY, json!({"error":{"message": error}}));
         }
         request["model"] = Value::String(actual.to_string());
         return proxy_ollama(&state.http, request).await;
@@ -228,8 +232,8 @@ async fn proxy_ollama(http: &Client, request: Value) -> Response<Body> {
         }
     };
 
-    let status = StatusCode::from_u16(upstream.status().as_u16())
-        .unwrap_or(StatusCode::BAD_GATEWAY);
+    let status =
+        StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let content_type = upstream
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -303,7 +307,9 @@ async fn antigravity_response(
         .structured_output
         .clone()
         .or_else(|| serde_json::from_str::<Value>(&response.response).ok())
-        .unwrap_or_else(|| json!({"kind":"message","text":response.response,"name":"","arguments":{}}));
+        .unwrap_or_else(
+            || json!({"kind":"message","text":response.response,"name":"","arguments":{}}),
+        );
 
     let id = format!("resp_{}", Uuid::new_v4().simple());
     let item_id = format!("item_{}", Uuid::new_v4().simple());
