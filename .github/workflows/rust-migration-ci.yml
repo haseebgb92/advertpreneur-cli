@@ -13,6 +13,8 @@ jobs:
   windows-validation:
     runs-on: windows-latest
     timeout-minutes: 45
+    env:
+      RUSTFLAGS: "-D warnings"
 
     steps:
       - name: Checkout validation branch
@@ -55,20 +57,10 @@ jobs:
           "ADP_RUST_SRC=$src" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Compile harness restored and checksum verified."
 
-      - name: Apply validated migration fixes
+      - name: Apply deterministic migration cleanup
         shell: pwsh
         run: |
-          $browser = Join-Path $env:ADP_RUST_SRC "crates\adp-browser\src\lib.rs"
-          $before = Get-Content $browser -Raw
-          $after = $before.Replace(
-            '["delete","remove","purchase","buy now","pay","checkout","place order","transfer","confirm delete","send payment"]',
-            '["publish","delete","remove","purchase","buy now","pay","checkout","place order","transfer","confirm delete","send payment"]'
-          )
-          if ($after -eq $before) {
-            throw "Expected browser high-risk action list was not found."
-          }
-          [IO.File]::WriteAllText($browser, $after)
-          Write-Host "Marked publish actions as explicit-run-only in taught browser routines."
+          python .ci/apply-rust-cleanups.py $env:ADP_RUST_SRC
 
       - name: Apply canonical Rust formatting
         shell: pwsh
