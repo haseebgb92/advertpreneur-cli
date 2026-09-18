@@ -1,0 +1,117 @@
+From: ADP Codex Unchained
+Subject: [PATCH 1/2] core: normalize function-call tool_search for compatible providers
+
+Custom Responses-compatible providers may serialize the client-side tool_search
+surface as an ordinary function_call instead of the specialized
+tool_search_call response item. Normalize that representation at ToolRouter's
+existing wire-to-runtime boundary so the ToolSearchHandler always receives
+ToolPayload::ToolSearch.
+
+This keeps the executor/provider boundary model-agnostic and fixes deferred
+tool discovery without provider-name checks.
+
+--- a/codex-rs/core/src/tools/router.rs
++++ b/codex-rs/core/src/tools/router.rs
+@@
+ use codex_tools::DiscoverableTool;
+ use codex_tools::ResponsesApiNamespaceTool;
++use codex_tools::TOOL_SEARCH_TOOL_NAME;
+ use codex_tools::ToolName;
+ use codex_tools::ToolSpec;
+@@
+             ResponseItem::FunctionCall {
+                 name,
+                 namespace,
+                 arguments,
+                 encrypted_function_args,
+                 call_id,
+                 ..
+             } => {
+                 let tool_name = ToolName::new(namespace, name).with_default_namespace();
++                if tool_name.is_default_namespace()
++                    && tool_name.name == TOOL_SEARCH_TOOL_NAME
++                {
++                    let arguments: SearchToolCallParams =
++                        serde_json::from_str(&arguments).map_err(|err| {
++                            FunctionCallError::RespondToModel(format!(
++                                "failed to parse tool_search arguments: {err}"
++                            ))
++                        })?;
++                    return Ok(Some(ToolCall {
++                        tool_name: ToolName::plain(TOOL_SEARCH_TOOL_NAME),
++                        call_id,
++                        payload: ToolPayload::ToolSearch { arguments },
++                        encrypted_function_args: None,
++                    }));
++                }
+                 Ok(Some(ToolCall {
+                     tool_name,
+                     call_id,
+                     payload: ToolPayload::Function { arguments },
+                     encrypted_function_args,
+                 }))
+--- a/codex-rs/core/src/tools/router_tests.rs
++++ b/codex-rs/core/src/tools/router_tests.rs
+@@
+ use codex_tools::ResponsesApiNamespace;
+ use codex_tools::ResponsesApiNamespaceTool;
++use codex_tools::TOOL_SEARCH_TOOL_NAME;
+ use codex_tools::ToolName;
+ use codex_tools::ToolSpec;
+@@
+ async fn build_tool_call_uses_namespace_for_registry_name() -> anyhow::Result<()> {
+@@
+ }
++
++#[test]
++fn build_tool_call_normalizes_function_call_tool_search() -> anyhow::Result<()> {
++    let call = ToolRouter::build_tool_call(ResponseItem::FunctionCall {
++        id: None,
++        name: TOOL_SEARCH_TOOL_NAME.to_string(),
++        namespace: None,
++        arguments: serde_json::json!({
++            "query": "browser computer use",
++            "limit": 4
++        })
++        .to_string(),
++        encrypted_function_args: None,
++        call_id: "call-tool-search".to_string(),
++        internal_chat_message_metadata_passthrough: None,
++    })?
++    .expect("function_call tool_search should normalize to a tool call");
++
++    assert_eq!(call.tool_name, ToolName::plain(TOOL_SEARCH_TOOL_NAME));
++    assert_eq!(call.call_id, "call-tool-search");
++    assert_eq!(call.encrypted_function_args, None);
++    match call.payload {
++        ToolPayload::ToolSearch { arguments } => {
++            assert_eq!(arguments.query, "browser computer use");
++            assert_eq!(arguments.limit, Some(4));
++        }
++        other => panic!("expected tool-search payload, got {other:?}"),
++    }
++
++    Ok(())
++}
++
++#[test]
++fn build_tool_call_does_not_rewrite_namespaced_tool_search() -> anyhow::Result<()> {
++    let call = ToolRouter::build_tool_call(ResponseItem::FunctionCall {
++        id: None,
++        name: TOOL_SEARCH_TOOL_NAME.to_string(),
++        namespace: Some("mcp__example".to_string()),
++        arguments: "{}".to_string(),
++        encrypted_function_args: None,
++        call_id: "call-namespaced-tool-search".to_string(),
++        internal_chat_message_metadata_passthrough: None,
++    })?
++    .expect("namespaced function should remain a normal function call");
++
++    assert_eq!(
++        call.tool_name,
++        ToolName::namespaced("mcp__example", TOOL_SEARCH_TOOL_NAME)
++    );
++    assert!(matches!(call.payload, ToolPayload::Function { .. }));
++
++    Ok(())
++}
