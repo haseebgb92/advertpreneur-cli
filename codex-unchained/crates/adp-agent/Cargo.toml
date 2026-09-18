@@ -10,5 +10,6 @@ adp-browser-broker = { path = "../adp-browser-broker" }
 adp-model = { path = "../adp-model" }
 adp-memory = { path = "../adp-memory" }
 adp-protocol = { path = "../adp-protocol" }
+adp-web = { path = "../adp-web" }
 serde_json.workspace = true
 thiserror.workspace = true
