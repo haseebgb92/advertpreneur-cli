@@ -1,0 +1,93 @@
+name: Rust Migration CI
+
+on:
+  push:
+    branches:
+      - rust-migration-ci
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-validation:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Restore checksum-verified Rust compile harness
+        shell: pwsh
+        run: |
+          $parts = Get-ChildItem ".ci\rust-src-*.b64" | Sort-Object Name
+          if ($parts.Count -ne 11) {
+            throw "Expected 11 Rust source chunks, got $($parts.Count)"
+          }
+
+          $b64 = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ""
+          $zip = Join-Path $env:RUNNER_TEMP "adp-rust-compile-harness.zip"
+          [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($b64))
+
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne "a11f85e17a02310ef3d7ffedb8f83dd168ae3a64eaddf9610f10ddd1567076c4") {
+            throw "Compile harness checksum mismatch: $hash"
+          }
+
+          $dst = Join-Path $env:RUNNER_TEMP "adp-rust-validation"
+          if (Test-Path $dst) {
+            Remove-Item -Recurse -Force $dst
+          }
+          New-Item -ItemType Directory -Path $dst | Out-Null
+          Expand-Archive -Path $zip -DestinationPath $dst
+
+          $src = Join-Path $dst "adp-rust-compile-harness"
+          if (-not (Test-Path (Join-Path $src "Cargo.toml"))) {
+            throw "Cargo.toml missing after harness extraction."
+          }
+
+          "ADP_RUST_SRC=$src" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Compile harness restored and checksum verified."
+
+      - name: Cargo fmt
+        shell: pwsh
+        run: |
+          Set-Location $env:ADP_RUST_SRC
+          cargo fmt --check
+
+      - name: Cargo check
+        shell: pwsh
+        run: |
+          Set-Location $env:ADP_RUST_SRC
+          cargo check --workspace
+
+      - name: Cargo test
+        shell: pwsh
+        run: |
+          Set-Location $env:ADP_RUST_SRC
+          cargo test --workspace
+
+      - name: Release build
+        shell: pwsh
+        run: |
+          Set-Location $env:ADP_RUST_SRC
+          cargo build --release -p adp
+
+      - name: Smoke version
+        shell: pwsh
+        run: |
+          Set-Location $env:ADP_RUST_SRC
+          .\target\release\adp.exe --version
+
+      - name: Upload validated Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: adp-windows-validation
+          path: ${{ env.ADP_RUST_SRC }}\target\release\adp.exe
+          if-no-files-found: error
