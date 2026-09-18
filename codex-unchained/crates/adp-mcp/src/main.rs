@@ -82,17 +82,8 @@ where
 }
 
 async fn handle_request(broker: &BrokerState, web: &WebClient, request: Value) -> Option<Value> {
-    let id = request.get("id").cloned();
-    let method = request.get("method").and_then(Value::as_str);
-
-    let Some(method) = method else {
-        return None;
-    };
-
-    if id.is_none() {
-        return None;
-    }
-    let id = id.unwrap_or(Value::Null);
+    let id = request.get("id").cloned()?;
+    let method = request.get("method").and_then(Value::as_str)?;
 
     let result = match method {
         "initialize" => {
