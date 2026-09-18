@@ -140,7 +140,7 @@ def main() -> None:
     test_text = replace_once(test_text, TEST_IMPORT_OLD, TEST_IMPORT_NEW, "test import")
     if "fn build_tool_call_normalizes_function_call_tool_search()" in test_text:
         raise SystemExit("tests already patched")
-    tests.write_text(test_text.rstrip() + TESTS + "\n", encoding="utf-8")
+    tests.write_text(test_text.rstrip() + TESTS.rstrip() + "\n", encoding="utf-8")
 
 if __name__ == "__main__":
     main()
