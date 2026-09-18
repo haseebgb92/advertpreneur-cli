@@ -1,0 +1,112 @@
+name: Codex Unchained Windows Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "codex-unchained-*"
+    paths:
+      - "codex-unchained/**"
+      - ".github/workflows/codex-unchained-package.yml"
+
+jobs:
+  adp-unchained-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build ADP Unchained
+        working-directory: codex-unchained
+        run: cargo build -p adp-unchained --release
+
+      - name: Smoke executable
+        working-directory: codex-unchained
+        shell: pwsh
+        run: |
+          .\target\release\adp-unchained.exe --help
+          .\target\release\adp-unchained.exe web-search --help
+          .\target\release\adp-unchained.exe replay --help
+
+      - name: Assemble Windows package
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE "codex-unchained"
+          $dist = Join-Path $root "dist\adp-unchained-windows-x64"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item (Join-Path $root "target\release\adp-unchained.exe") $dist
+          Copy-Item -Recurse (Join-Path $root "extension") (Join-Path $dist "extension")
+          Copy-Item (Join-Path $root "README.md") $dist
+          Copy-Item (Join-Path $root "INSTALL-WINDOWS.ps1") $dist
+          $zip = Join-Path $root "dist\adp-unchained-windows-x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path (Join-Path $dist "*") -DestinationPath $zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adp-unchained-windows-x64
+          path: codex-unchained/dist/adp-unchained-windows-x64.zip
+          if-no-files-found: error
+
+  patched-codex-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Fetch pinned upstream Codex
+        shell: pwsh
+        run: |
+          $sha = (Get-Content "codex-unchained\upstream-patches\UPSTREAM_SHA" -Raw).Trim()
+          $root = Join-Path $env:RUNNER_TEMP "codex-upstream"
+          if (Test-Path $root) { Remove-Item $root -Recurse -Force }
+          git init $root
+          git -C $root remote add origin https://github.com/openai/codex.git
+          git -C $root fetch --depth=1 origin $sha
+          git -C $root checkout --detach FETCH_HEAD
+          $actual = (git -C $root rev-parse HEAD).Trim()
+          if ($actual -ne $sha) { throw "Pinned Codex SHA mismatch: $actual != $sha" }
+          "CODEX_UPSTREAM_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Apply provider compatibility surgery
+        shell: pwsh
+        run: |
+          python "codex-unchained\upstream-patches\apply_0001.py" "$env:CODEX_UPSTREAM_ROOT"
+          python "codex-unchained\upstream-patches\apply_0002.py" "$env:CODEX_UPSTREAM_ROOT"
+          git -C "$env:CODEX_UPSTREAM_ROOT" diff --check
+
+      - name: Build patched Codex CLI
+        shell: pwsh
+        run: |
+          Push-Location (Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs")
+          cargo build -p codex-cli --release
+          Pop-Location
+
+      - name: Smoke patched Codex
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs\target\release\codex.exe"
+          & $exe --version
+          & $exe --help | Select-Object -First 40
+
+      - name: Assemble patched Codex artifact
+        shell: pwsh
+        run: |
+          $dist = Join-Path $env:GITHUB_WORKSPACE "codex-unchained\dist\patched-codex-windows-x64"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item (Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs\target\release\codex.exe") $dist
+          Copy-Item "codex-unchained\upstream-patches\UPSTREAM_SHA" $dist
+          Copy-Item "codex-unchained\docs\UPSTREAM_CODEX_INTEGRATION.md" $dist
+          $zip = Join-Path $env:GITHUB_WORKSPACE "codex-unchained\dist\patched-codex-windows-x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path (Join-Path $dist "*") -DestinationPath $zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patched-codex-windows-x64
+          path: codex-unchained/dist/patched-codex-windows-x64.zip
+          if-no-files-found: error
