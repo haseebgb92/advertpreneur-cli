@@ -3,6 +3,7 @@ use adp_browser_broker::{BrokerError, BrokerState};
 use adp_memory::SemanticTarget;
 use adp_model::{ChatMessage, ModelError, OllamaClient};
 use adp_protocol::{Capability, ModelEvent, ToolCall, ToolDescriptor};
+use adp_web::{WebClient, WebError};
 use serde_json::{Value, json};
 use std::time::Duration;
 use thiserror::Error;
@@ -17,6 +18,8 @@ pub const BROWSER_FILL: &str = "adp_browser_fill";
 pub const BROWSER_NAVIGATE: &str = "adp_browser_navigate";
 pub const BROWSER_SCROLL: &str = "adp_browser_scroll";
 pub const BROWSER_WAIT_DOWNLOAD: &str = "adp_browser_wait_download";
+pub const WEB_SEARCH: &str = "adp_web_search";
+pub const WEB_FETCH: &str = "adp_web_fetch";
 
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
@@ -60,6 +63,10 @@ pub enum AgentError {
     UnknownTool(String),
     #[error("browser command failed: {0}")]
     BrowserCommand(String),
+    #[error(transparent)]
+    Web(#[from] WebError),
+    #[error("web tool '{0}' is not configured")]
+    WebUnavailable(String),
     #[error("agent reached the model-turn limit before producing a final response")]
     TurnLimit,
 }
@@ -67,6 +74,7 @@ pub enum AgentError {
 pub struct AgentRuntime<'a> {
     model: &'a OllamaClient,
     broker: &'a BrokerState,
+    web_client: Option<&'a WebClient>,
     browser_provider_id: Option<String>,
     browser_tab_id: Option<i64>,
     allowed_tool_names: Option<Vec<String>>,
@@ -78,11 +86,17 @@ impl<'a> AgentRuntime<'a> {
         Self {
             model,
             broker,
+            web_client: None,
             browser_provider_id: None,
             browser_tab_id: None,
             allowed_tool_names: None,
             config: AgentConfig::default(),
         }
+    }
+
+    pub fn with_web_client(mut self, web_client: &'a WebClient) -> Self {
+        self.web_client = Some(web_client);
+        self
     }
 
     pub fn with_browser_provider(mut self, provider_id: impl Into<String>) -> Self {
@@ -109,11 +123,13 @@ impl<'a> AgentRuntime<'a> {
     }
 
     pub fn tool_inventory(&self) -> Vec<ToolDescriptor> {
-        if self.browser_provider_id.is_none() {
-            return Vec::new();
+        let mut tools = Vec::new();
+        if self.browser_provider_id.is_some() {
+            tools.extend(browser_tools());
         }
-
-        let mut tools = browser_tools();
+        if self.web_client.is_some() {
+            tools.extend(web_tools());
+        }
         if let Some(allowed) = &self.allowed_tool_names {
             tools.retain(|tool| allowed.iter().any(|name| name == &tool.name));
         }
@@ -196,6 +212,35 @@ impl<'a> AgentRuntime<'a> {
     }
 
     async fn dispatch_tool(&self, call: &ToolCall) -> Result<Value, AgentError> {
+        match call.name.as_str() {
+            WEB_SEARCH => {
+                let web = self
+                    .web_client
+                    .ok_or_else(|| AgentError::WebUnavailable(call.name.clone()))?;
+                let query = required_string(call, "query")?;
+                let max_results = call
+                    .arguments
+                    .get("max_results")
+                    .and_then(Value::as_u64)
+                    .map(|value| value.min(u32::MAX as u64) as u32);
+                return Ok(serde_json::to_value(
+                    web.search(&query, max_results).await?,
+                )
+                .expect("web search response is serializable"));
+            }
+            WEB_FETCH => {
+                let web = self
+                    .web_client
+                    .ok_or_else(|| AgentError::WebUnavailable(call.name.clone()))?;
+                let url = required_string(call, "url")?;
+                return Ok(
+                    serde_json::to_value(web.fetch(&url).await?)
+                        .expect("web fetch response is serializable"),
+                );
+            }
+            _ => {}
+        }
+
         let provider_id = self
             .browser_provider_id
             .as_deref()
@@ -243,6 +288,40 @@ impl<'a> AgentRuntime<'a> {
             ))
         }
     }
+}
+
+pub fn web_tools() -> Vec<ToolDescriptor> {
+    vec![
+        descriptor_for(
+            WEB_SEARCH,
+            "Search the public web using the host web runtime. Use concise queries and inspect result URLs with adp_web_fetch when more context is needed.",
+            Capability::WebSearch,
+            json!({
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "minimum": 1, "maximum": 10}
+                },
+                "additionalProperties": false
+            }),
+            true,
+        ),
+        descriptor_for(
+            WEB_FETCH,
+            "Fetch readable content and links from a public web URL using the host web runtime.",
+            Capability::WebSearch,
+            json!({
+                "type": "object",
+                "required": ["url"],
+                "properties": {
+                    "url": {"type": "string"}
+                },
+                "additionalProperties": false
+            }),
+            true,
+        ),
+    ]
 }
 
 pub fn browser_tools() -> Vec<ToolDescriptor> {
@@ -343,10 +422,26 @@ fn descriptor(
     input_schema: Value,
     deterministic_safe: bool,
 ) -> ToolDescriptor {
+    descriptor_for(
+        name,
+        description,
+        Capability::Browser,
+        input_schema,
+        deterministic_safe,
+    )
+}
+
+fn descriptor_for(
+    name: &str,
+    description: &str,
+    capability: Capability,
+    input_schema: Value,
+    deterministic_safe: bool,
+) -> ToolDescriptor {
     ToolDescriptor {
         name: name.to_string(),
         description: description.to_string(),
-        capability: Capability::Browser,
+        capability,
         input_schema,
         deterministic_safe,
     }
@@ -415,6 +510,18 @@ mod tests {
             inventory
                 .iter()
                 .all(|tool| tool.capability == Capability::Browser)
+        );
+    }
+
+    #[test]
+    fn web_inventory_is_independent_of_browser_inventory() {
+        let inventory = web_tools();
+        assert!(inventory.iter().any(|tool| tool.name == WEB_SEARCH));
+        assert!(inventory.iter().any(|tool| tool.name == WEB_FETCH));
+        assert!(
+            inventory
+                .iter()
+                .all(|tool| tool.capability == Capability::WebSearch)
         );
     }
 
