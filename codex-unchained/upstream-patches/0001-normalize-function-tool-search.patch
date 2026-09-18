@@ -1,117 +1,144 @@
 From: ADP Codex Unchained
-Subject: [PATCH 1/2] core: normalize function-call tool_search for compatible providers
+Subject: [PATCH 1/2] core: preserve function-call tool_search wire dialect
 
-Custom Responses-compatible providers may serialize the client-side tool_search
-surface as an ordinary function_call instead of the specialized
-tool_search_call response item. Normalize that representation at ToolRouter's
-existing wire-to-runtime boundary so the ToolSearchHandler always receives
-ToolPayload::ToolSearch.
+Some Responses-compatible providers expose Codex's client-side tool_search
+surface as an ordinary function call rather than the specialized
+tool_search_call item.
 
-This keeps the executor/provider boundary model-agnostic and fixes deferred
-tool discovery without provider-name checks.
+Preserve that dialect end-to-end:
+- native tool_search_call -> ToolSearch payload -> tool_search_output
+- ordinary function_call("tool_search") -> Function payload -> function_call_output
 
---- a/codex-rs/core/src/tools/router.rs
-+++ b/codex-rs/core/src/tools/router.rs
+This lets host-side deferred tool discovery work with compatible providers
+without converting their response/output dialect into an OpenAI-specific form.
+
+--- a/codex-rs/core/src/tools/handlers/tool_search.rs
++++ b/codex-rs/core/src/tools/handlers/tool_search.rs
 @@
- use codex_tools::DiscoverableTool;
- use codex_tools::ResponsesApiNamespaceTool;
-+use codex_tools::TOOL_SEARCH_TOOL_NAME;
- use codex_tools::ToolName;
- use codex_tools::ToolSpec;
+ use bm25::SearchEngine;
+ use bm25::SearchEngineBuilder;
++use codex_protocol::models::SearchToolCallParams;
+ use codex_tools::LoadableToolSpec;
 @@
-             ResponseItem::FunctionCall {
-                 name,
-                 namespace,
-                 arguments,
-                 encrypted_function_args,
-                 call_id,
-                 ..
-             } => {
-                 let tool_name = ToolName::new(namespace, name).with_default_namespace();
-+                if tool_name.is_default_namespace()
-+                    && tool_name.name == TOOL_SEARCH_TOOL_NAME
-+                {
-+                    let arguments: SearchToolCallParams =
-+                        serde_json::from_str(&arguments).map_err(|err| {
-+                            FunctionCallError::RespondToModel(format!(
-+                                "failed to parse tool_search arguments: {err}"
-+                            ))
-+                        })?;
-+                    return Ok(Some(ToolCall {
-+                        tool_name: ToolName::plain(TOOL_SEARCH_TOOL_NAME),
-+                        call_id,
-+                        payload: ToolPayload::ToolSearch { arguments },
-+                        encrypted_function_args: None,
-+                    }));
-+                }
-                 Ok(Some(ToolCall {
-                     tool_name,
-                     call_id,
-                     payload: ToolPayload::Function { arguments },
-                     encrypted_function_args,
-                 }))
---- a/codex-rs/core/src/tools/router_tests.rs
-+++ b/codex-rs/core/src/tools/router_tests.rs
+-        let args = match payload {
+-            ToolPayload::ToolSearch { arguments } => arguments,
+-            _ => {
+-                return Err(FunctionCallError::Fatal(format!(
+-                    "{TOOL_SEARCH_TOOL_NAME} handler received unsupported payload"
+-                )));
+-            }
+-        };
++        let args = parse_tool_search_payload(payload)?;
 @@
- use codex_tools::ResponsesApiNamespace;
- use codex_tools::ResponsesApiNamespaceTool;
-+use codex_tools::TOOL_SEARCH_TOOL_NAME;
- use codex_tools::ToolName;
- use codex_tools::ToolSpec;
+ }
+ 
++fn parse_tool_search_payload(
++    payload: ToolPayload,
++) -> Result<SearchToolCallParams, FunctionCallError> {
++    match payload {
++        ToolPayload::ToolSearch { arguments } => Ok(arguments),
++        ToolPayload::Function { arguments } => {
++            serde_json::from_str(&arguments).map_err(|err| {
++                FunctionCallError::RespondToModel(format!(
++                    "failed to parse tool_search arguments: {err}"
++                ))
++            })
++        }
++        ToolPayload::Custom { .. } => Err(FunctionCallError::Fatal(format!(
++            "{TOOL_SEARCH_TOOL_NAME} handler received unsupported payload"
++        ))),
++    }
++}
++
++#[cfg(test)]
++mod function_payload_tests {
++    use super::*;
++
++    #[test]
++    fn function_tool_search_payload_is_accepted() {
++        let args = parse_tool_search_payload(ToolPayload::Function {
++            arguments: r#"{"query":"browser computer use","limit":4}"#.to_string(),
++        })
++        .expect("ordinary function payload should be accepted for tool_search");
++
++        assert_eq!(args.query, "browser computer use");
++        assert_eq!(args.limit, Some(4));
++    }
++}
++
+ impl CoreToolRuntime for ToolSearchHandler {}
+--- a/codex-rs/core/src/tools/context.rs
++++ b/codex-rs/core/src/tools/context.rs
 @@
- async fn build_tool_call_uses_namespace_for_registry_name() -> anyhow::Result<()> {
+-    fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> ResponseInputItem {
+-        ResponseInputItem::ToolSearchOutput {
+-            call_id: call_id.to_string(),
+-            status: "completed".to_string(),
+-            execution: "client".to_string(),
+-            tools: self
+-                .tools
+-                .iter()
+-                .map(|tool| {
+-                    serde_json::to_value(tool).unwrap_or_else(|err| {
+-                        JsonValue::String(format!("failed to serialize tool_search output: {err}"))
+-                    })
+-                })
+-                .collect(),
+-        }
++    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem {
++        let tools = self
++            .tools
++            .iter()
++            .map(|tool| {
++                serde_json::to_value(tool).unwrap_or_else(|err| {
++                    JsonValue::String(format!("failed to serialize tool_search output: {err}"))
++                })
++            })
++            .collect::<Vec<_>>();
++
++        if matches!(payload, ToolPayload::Function { .. }) {
++            return ResponseInputItem::FunctionCallOutput {
++                call_id: call_id.to_string(),
++                output: FunctionCallOutputPayload {
++                    body: FunctionCallOutputBody::Text(JsonValue::Array(tools).to_string()),
++                    success: Some(true),
++                },
++            };
++        }
++
++        ResponseInputItem::ToolSearchOutput {
++            call_id: call_id.to_string(),
++            status: "completed".to_string(),
++            execution: "client".to_string(),
++            tools,
++        }
+     }
+ }
+--- a/codex-rs/core/src/tools/context_tests.rs
++++ b/codex-rs/core/src/tools/context_tests.rs
+@@
+ fn tool_search_payloads_roundtrip_as_tool_search_outputs() {
 @@
  }
 +
 +#[test]
-+fn build_tool_call_normalizes_function_call_tool_search() -> anyhow::Result<()> {
-+    let call = ToolRouter::build_tool_call(ResponseItem::FunctionCall {
-+        id: None,
-+        name: TOOL_SEARCH_TOOL_NAME.to_string(),
-+        namespace: None,
-+        arguments: serde_json::json!({
++fn function_tool_search_payloads_roundtrip_as_function_outputs() {
++    let payload = ToolPayload::Function {
++        arguments: json!({
 +            "query": "browser computer use",
 +            "limit": 4
 +        })
 +        .to_string(),
-+        encrypted_function_args: None,
-+        call_id: "call-tool-search".to_string(),
-+        internal_chat_message_metadata_passthrough: None,
-+    })?
-+    .expect("function_call tool_search should normalize to a tool call");
++    };
++    let response = ToolSearchOutput { tools: Vec::new() }
++        .to_response_item("function-search-1", &payload);
 +
-+    assert_eq!(call.tool_name, ToolName::plain(TOOL_SEARCH_TOOL_NAME));
-+    assert_eq!(call.call_id, "call-tool-search");
-+    assert_eq!(call.encrypted_function_args, None);
-+    match call.payload {
-+        ToolPayload::ToolSearch { arguments } => {
-+            assert_eq!(arguments.query, "browser computer use");
-+            assert_eq!(arguments.limit, Some(4));
++    match response {
++        ResponseInputItem::FunctionCallOutput { call_id, output } => {
++            assert_eq!(call_id, "function-search-1");
++            assert_eq!(output.body.to_text().as_deref(), Some("[]"));
++            assert_eq!(output.success, Some(true));
 +        }
-+        other => panic!("expected tool-search payload, got {other:?}"),
++        other => panic!("expected FunctionCallOutput, got {other:?}"),
 +    }
-+
-+    Ok(())
-+}
-+
-+#[test]
-+fn build_tool_call_does_not_rewrite_namespaced_tool_search() -> anyhow::Result<()> {
-+    let call = ToolRouter::build_tool_call(ResponseItem::FunctionCall {
-+        id: None,
-+        name: TOOL_SEARCH_TOOL_NAME.to_string(),
-+        namespace: Some("mcp__example".to_string()),
-+        arguments: "{}".to_string(),
-+        encrypted_function_args: None,
-+        call_id: "call-namespaced-tool-search".to_string(),
-+        internal_chat_message_metadata_passthrough: None,
-+    })?
-+    .expect("namespaced function should remain a normal function call");
-+
-+    assert_eq!(
-+        call.tool_name,
-+        ToolName::namespaced("mcp__example", TOOL_SEARCH_TOOL_NAME)
-+    );
-+    assert!(matches!(call.payload, ToolPayload::Function { .. }));
-+
-+    Ok(())
 +}
