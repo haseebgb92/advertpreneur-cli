@@ -8,7 +8,7 @@ pub const PROTOCOL_VERSION: u32 = 2;
 pub struct ProviderRegistration {
     pub protocol_version: u32,
     pub provider_id: String,
-    pub token: String,
+    pub session_key: String,
     pub label: String,
     pub extension_version: String,
     #[serde(default)]
