@@ -8,6 +8,7 @@ members = [
   "crates/adp-browser-broker",
   "crates/adp-executor",
   "crates/adp-model",
+  "crates/adp-web",
   "crates/adp-agent",
   "crates/adp-teach",
   "crates/adp-unchained",
