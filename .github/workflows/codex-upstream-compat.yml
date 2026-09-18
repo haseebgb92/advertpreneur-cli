@@ -49,10 +49,13 @@ jobs:
             codex-rs/core/src/tools/context.rs \
             codex-rs/core/src/tools/context_tests.rs \
             codex-rs/models-manager/src/model_info.rs \
-            codex-rs/models-manager/src/model_info_tests.rs \\\n            codex-rs/utils/home-dir/src/lib.rs \\\n            codex-rs/cli/src/main.rs
+            codex-rs/models-manager/src/model_info_tests.rs \
+            codex-rs/utils/home-dir/src/lib.rs \
+            codex-rs/cli/src/main.rs
       - name: Run focused Codex compatibility tests
         working-directory: /tmp/codex/codex-rs
         run: |
           cargo test -p codex-core function_tool_search_ --lib
           cargo test -p codex-core tool_search_payloads_roundtrip_as_tool_search_outputs --lib
-          cargo test -p codex-models-manager unknown_model_keeps_local_tool_discovery_and_extension_instructions --lib\n          cargo test -p codex-utils-home-dir find_codex_home_without_env_uses_default_home_dir --lib
+          cargo test -p codex-models-manager unknown_model_keeps_local_tool_discovery_and_extension_instructions --lib
+          cargo test -p codex-utils-home-dir find_codex_home_without_env_uses_default_home_dir --lib
