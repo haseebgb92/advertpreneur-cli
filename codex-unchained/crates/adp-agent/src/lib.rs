@@ -229,12 +229,7 @@ impl<'a> AgentRuntime<'a> {
 
         let result = self
             .broker
-            .call(
-                provider_id,
-                self.browser_tab_id,
-                action,
-                TOOL_TIMEOUT,
-            )
+            .call(provider_id, self.browser_tab_id, action, TOOL_TIMEOUT)
             .await?;
 
         if result.ok {
@@ -415,9 +410,11 @@ mod tests {
         let inventory = browser_tools();
         assert!(inventory.iter().any(|tool| tool.name == BROWSER_INSPECT));
         assert!(inventory.iter().any(|tool| tool.name == BROWSER_FILL));
-        assert!(inventory
-            .iter()
-            .all(|tool| tool.capability == Capability::Browser));
+        assert!(
+            inventory
+                .iter()
+                .all(|tool| tool.capability == Capability::Browser)
+        );
     }
 
     #[test]
