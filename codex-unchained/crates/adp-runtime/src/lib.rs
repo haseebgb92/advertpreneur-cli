@@ -1,4 +1,3 @@
-
 use adp_protocol::{
     ExecutionBudget, ExecutionTier, InvocationDialect, ProviderCapabilities, ToolDescriptor,
 };
