@@ -102,9 +102,7 @@ pub fn sanitize_learn_event(mut event: LearnEvent) -> Option<LearnEvent> {
     if event.action == "fill" {
         let value = event.value.take().unwrap_or_default();
         event.value = sanitize_fill(&event.selector_hint, &value);
-        if event.value.is_none() {
-            return None;
-        }
+        event.value.as_ref()?;
         debug_assert_eq!(event.value.as_deref(), Some(TEACH_KEYWORD));
     }
     Some(event)
