@@ -56,11 +56,22 @@ impl<'a> WorkflowExecutor<'a> {
     }
 
     pub async fn replay(&self, workflow: &Workflow, context: &ExecutionContext) -> ReplayOutcome {
-        let mut stats = self.load_stats(&workflow.name);
-        stats.runs += 1;
+        self.replay_from(workflow, context, 0).await
+    }
 
-        let mut completed = 0usize;
-        for step in &workflow.steps {
+    pub async fn replay_from(
+        &self,
+        workflow: &Workflow,
+        context: &ExecutionContext,
+        start_index: usize,
+    ) -> ReplayOutcome {
+        let mut stats = self.load_stats(&workflow.name);
+        if start_index == 0 {
+            stats.runs += 1;
+        }
+
+        let mut completed = start_index;
+        for step in workflow.steps.iter().skip(start_index) {
             let before = match self.inspect().await {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
@@ -225,12 +236,18 @@ impl<'a> WorkflowExecutor<'a> {
             completed += 1;
         }
 
-        stats.deterministic_runs += 1;
+        if start_index == 0 {
+            stats.deterministic_runs += 1;
+        }
         stats.successful_runs += 1;
         let _ = self.memory.save_run_stats(&workflow.name, &stats);
         ReplayOutcome::Completed {
             steps_executed: completed,
         }
+    }
+
+    pub async fn inspect_snapshot(&self) -> Result<BrowserSnapshot, String> {
+        self.inspect().await
     }
 
     async fn inspect(&self) -> Result<BrowserSnapshot, String> {
@@ -394,6 +411,20 @@ pub fn fingerprint_snapshot(snapshot: &BrowserSnapshot) -> PageFingerprint {
         .collect::<Vec<_>>();
 
     PageFingerprint::from_observation(&snapshot.url, &snapshot.title, &landmarks)
+}
+
+pub fn verify_repair_candidate(
+    step: &WorkflowStep,
+    snapshot: &BrowserSnapshot,
+) -> Result<PageFingerprint, String> {
+    let fingerprint = fingerprint_snapshot(snapshot);
+    verify_step(
+        snapshot,
+        &fingerprint,
+        &step.verify,
+        Some(fingerprint.digest.as_str()),
+    )?;
+    Ok(fingerprint)
 }
 
 fn verify_step(
