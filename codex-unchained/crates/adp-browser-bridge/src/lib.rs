@@ -1,5 +1,4 @@
-
-use adp_memory::{safe_url, sanitize_fill, SemanticTarget, TEACH_KEYWORD};
+use adp_memory::{SemanticTarget, TEACH_KEYWORD, safe_url, sanitize_fill};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -48,13 +47,25 @@ impl BrowserSnapshot {
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum BrowserAction {
     BindActive,
-    Navigate { url: String },
+    Navigate {
+        url: String,
+    },
     Inspect,
-    Click { target: SemanticTarget },
-    Fill { target: SemanticTarget, value: String },
-    Scroll { amount: i64 },
+    Click {
+        target: SemanticTarget,
+    },
+    Fill {
+        target: SemanticTarget,
+        value: String,
+    },
+    Scroll {
+        amount: i64,
+    },
     Screenshot,
-    WaitForDownload { after_id: i64, timeout_ms: u64 },
+    WaitForDownload {
+        after_id: i64,
+        timeout_ms: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -109,8 +120,14 @@ fn sanitize_evidence(value: Value) -> Value {
         }
     }
     for key in [
-        "value", "password", "token", "cookie", "authorization", "screenshot",
-        "html", "dom",
+        "value",
+        "password",
+        "token",
+        "cookie",
+        "authorization",
+        "screenshot",
+        "html",
+        "dom",
     ] {
         object.remove(key);
     }
