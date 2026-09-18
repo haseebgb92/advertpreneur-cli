@@ -173,4 +173,3 @@
 +    render_live(&rt);
 +    let thread_rt = Arc::clone(&rt);
 +    let handle = thread::spawn(move || {
-+
