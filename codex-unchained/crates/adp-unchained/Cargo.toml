@@ -16,6 +16,7 @@ adp-memory = { path = "../adp-memory" }
 adp-model = { path = "../adp-model" }
 adp-protocol = { path = "../adp-protocol" }
 adp-teach = { path = "../adp-teach" }
+adp-web = { path = "../adp-web" }
 clap.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
