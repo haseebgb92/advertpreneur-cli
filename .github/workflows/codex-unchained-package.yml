@@ -124,6 +124,33 @@ jobs:
           if (Test-Path $zip) { Remove-Item $zip -Force }
           Compress-Archive -Path (Join-Path $dist "*") -DestinationPath $zip
 
+      - name: Smoke isolated Unchained installer
+        shell: pwsh
+        run: |
+          $dist = Join-Path $env:GITHUB_WORKSPACE "codex-unchained\dist\patched-codex-windows-x64"
+          $profile = Join-Path $env:RUNNER_TEMP "unchained-profile"
+          $install = Join-Path $env:RUNNER_TEMP "unchained-install"
+          $home = Join-Path $profile ".codex-unchained"
+          New-Item -ItemType Directory -Force -Path $profile | Out-Null
+          $oldUserProfile = $env:USERPROFILE
+          try {
+            $env:USERPROFILE = $profile
+            & (Join-Path $dist "INSTALL-CODEX-WINDOWS.ps1") -InstallRoot $install -UnchainedHome $home
+          }
+          finally {
+            $env:USERPROFILE = $oldUserProfile
+          }
+          $config = Join-Path $home "config.toml"
+          if (-not (Test-Path $config)) { throw "Unchained config was not created" }
+          $text = Get-Content $config -Raw
+          if ($text -notmatch 'model_provider\s*=\s*"unchained"') { throw "Unchained provider missing" }
+          if ($text -notmatch '\[model_providers\.unchained\]') { throw "Unchained provider block missing" }
+          if ($text -notmatch '\[mcp_servers\.adp\]') { throw "ADP MCP block missing" }
+          if (Test-Path (Join-Path $profile ".codex")) { throw "Installer touched normal Codex home" }
+          if (-not (Test-Path (Join-Path $profile ".gemini\config\agents\adp-unchained-brain\agent.md"))) {
+            throw "Antigravity brain-only agent was not installed"
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: patched-codex-windows-x64
