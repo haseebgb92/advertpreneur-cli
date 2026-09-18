@@ -36,3 +36,36 @@ jobs:
           node-version: "24"
       - run: node --check codex-unchained/extension/background.js
       - run: node --check codex-unchained/extension/content.js
+
+  upstream-tool-router:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Fetch pinned Codex upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA="$(cat codex-unchained/upstream-patches/UPSTREAM_SHA)"
+          git init /tmp/codex
+          git -C /tmp/codex remote add origin https://github.com/openai/codex.git
+          git -C /tmp/codex fetch --depth=1 origin "$SHA"
+          git -C /tmp/codex checkout --detach FETCH_HEAD
+          test "$(git -C /tmp/codex rev-parse HEAD)" = "$SHA"
+      - name: Apply ADP compatibility surgery
+        run: python codex-unchained/upstream-patches/apply_0001.py /tmp/codex
+      - name: Validate patch formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C /tmp/codex diff --check
+          cd /tmp/codex/codex-rs
+          cargo fmt --all -- --check
+      - name: Show exact upstream diff
+        run: git -C /tmp/codex diff -- codex-rs/core/src/tools/router.rs codex-rs/core/src/tools/router_tests.rs
+      - name: Run focused Codex router tests
+        working-directory: /tmp/codex/codex-rs
+        run: cargo test -p codex-core build_tool_call_ --lib
+
