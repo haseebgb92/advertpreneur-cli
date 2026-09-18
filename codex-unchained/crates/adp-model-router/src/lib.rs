@@ -56,7 +56,8 @@ async fn list_models(State(state): State<ModelRouterState>) -> Response<Body> {
 }
 
 async fn build_catalog(state: &ModelRouterState) -> Result<Vec<Value>, String> {
-    let local = fetch_ollama_tags(&state.http, &format!("{OLLAMA_LOCAL}/api/tags"));
+    let local_endpoint = format!("{OLLAMA_LOCAL}/api/tags");
+    let local = fetch_ollama_tags(&state.http, &local_endpoint);
     let cloud = fetch_ollama_tags(&state.http, OLLAMA_CLOUD_CATALOG);
     let agy = {
         let client = state.antigravity.clone();
