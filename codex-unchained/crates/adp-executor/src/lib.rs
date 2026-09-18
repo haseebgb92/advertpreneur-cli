@@ -87,7 +87,19 @@ impl<'a> WorkflowExecutor<'a> {
                 return self.finish_repair(workflow, stats, completed, divergence);
             };
 
-            if before_fingerprint.digest != expected_before.digest {
+            let active_repair = if before_fingerprint.digest == expected_before.digest {
+                None
+            } else {
+                workflow.repairs.iter().find(|repair| {
+                    repair.verified
+                        && repair.step_id == step.id
+                        && repair.observed_signature == before_fingerprint.digest
+                        && repair.repaired_target.is_some()
+                        && repair.after_signature.is_some()
+                })
+            };
+
+            if before_fingerprint.digest != expected_before.digest && active_repair.is_none() {
                 let divergence = repair_divergence(
                     step,
                     "browser state differs from the learned workflow",
@@ -107,7 +119,15 @@ impl<'a> WorkflowExecutor<'a> {
                 return self.finish_repair(workflow, stats, completed, divergence);
             }
 
-            if step.verify.is_empty() && step.expected_after.is_none() {
+            let expected_after_signature = active_repair
+                .and_then(|repair| repair.after_signature.as_deref())
+                .or_else(|| {
+                    step.expected_after
+                        .as_ref()
+                        .map(|value| value.digest.as_str())
+                });
+
+            if step.verify.is_empty() && expected_after_signature.is_none() {
                 let divergence = repair_divergence(
                     step,
                     "step has no post-action verification",
@@ -117,7 +137,8 @@ impl<'a> WorkflowExecutor<'a> {
                 return self.finish_repair(workflow, stats, completed, divergence);
             }
 
-            let action = match action_for_step(step, context) {
+            let target_override = active_repair.and_then(|repair| repair.repaired_target.as_ref());
+            let action = match action_for_step(step, context, target_override) {
                 Ok(action) => action,
                 Err(reason) => {
                     let divergence = repair_divergence(
@@ -165,35 +186,38 @@ impl<'a> WorkflowExecutor<'a> {
                         step,
                         format!("post-action inspection failed: {error}"),
                         None,
-                        step.expected_after
-                            .as_ref()
-                            .map(|value| value.digest.clone()),
+                        expected_after_signature.map(str::to_string),
                     );
                     return self.finish_repair(workflow, stats, completed, divergence);
                 }
             };
 
             let after_fingerprint = fingerprint_snapshot(&after);
-            if let Some(expected_after) = step.expected_after.as_ref()
-                && after_fingerprint.digest != expected_after.digest
+            if let Some(expected_after) = expected_after_signature
+                && after_fingerprint.digest != expected_after
             {
                 let divergence = repair_divergence(
                     step,
                     "post-action browser state differs from learned state",
                     Some(after_fingerprint.digest),
-                    Some(expected_after.digest.clone()),
+                    Some(expected_after.to_string()),
                 );
                 return self.finish_repair(workflow, stats, completed, divergence);
             }
 
-            if let Err(reason) = verify_step(&after, &after_fingerprint, &step.verify) {
+            let state_digest_override =
+                active_repair.and_then(|repair| repair.after_signature.as_deref());
+            if let Err(reason) = verify_step(
+                &after,
+                &after_fingerprint,
+                &step.verify,
+                state_digest_override,
+            ) {
                 let divergence = repair_divergence(
                     step,
                     reason,
                     Some(after_fingerprint.digest),
-                    step.expected_after
-                        .as_ref()
-                        .map(|value| value.digest.clone()),
+                    expected_after_signature.map(str::to_string),
                 );
                 return self.finish_repair(workflow, stats, completed, divergence);
             }
@@ -273,13 +297,14 @@ fn repair_divergence(
 fn action_for_step(
     step: &WorkflowStep,
     context: &ExecutionContext,
+    target_override: Option<&SemanticTarget>,
 ) -> Result<BrowserAction, String> {
     match step.action.as_str() {
         "click" => Ok(BrowserAction::Click {
-            target: required_target(step)?,
+            target: required_target(step, target_override)?,
         }),
         "fill" => Ok(BrowserAction::Fill {
-            target: required_target(step)?,
+            target: required_target(step, target_override)?,
             value: resolve_fill_value(step, context)?,
         }),
         "navigate" => {
@@ -309,9 +334,13 @@ fn action_for_step(
     }
 }
 
-fn required_target(step: &WorkflowStep) -> Result<SemanticTarget, String> {
-    step.target
-        .clone()
+fn required_target(
+    step: &WorkflowStep,
+    target_override: Option<&SemanticTarget>,
+) -> Result<SemanticTarget, String> {
+    target_override
+        .cloned()
+        .or_else(|| step.target.clone())
         .ok_or_else(|| "step has no semantic target".to_string())
 }
 
@@ -371,6 +400,7 @@ fn verify_step(
     snapshot: &BrowserSnapshot,
     fingerprint: &PageFingerprint,
     verifications: &[Verification],
+    state_digest_override: Option<&str>,
 ) -> Result<(), String> {
     for verification in verifications {
         match verification.kind.as_str() {
@@ -397,10 +427,13 @@ fn verify_step(
                 }
             }
             "state_digest" => {
-                let digest = verification
-                    .expected
-                    .as_str()
-                    .ok_or_else(|| "state_digest verification must be text".to_string())?;
+                let digest = match state_digest_override {
+                    Some(digest) => digest,
+                    None => verification
+                        .expected
+                        .as_str()
+                        .ok_or_else(|| "state_digest verification must be text".to_string())?,
+                };
                 if fingerprint.digest != digest {
                     return Err("verification failed: state digest changed".to_string());
                 }
@@ -496,7 +529,7 @@ mod tests {
             ..Default::default()
         };
 
-        let action = action_for_step(&step, &context).unwrap();
+        let action = action_for_step(&step, &context, None).unwrap();
         assert_eq!(
             action,
             BrowserAction::Fill {
@@ -520,7 +553,7 @@ mod tests {
             safe_for_deterministic_replay: true,
         };
 
-        assert!(action_for_step(&step, &ExecutionContext::default()).is_err());
+        assert!(action_for_step(&step, &ExecutionContext::default(), None).is_err());
     }
 
     #[test]
@@ -534,6 +567,6 @@ mod tests {
             }),
         };
         let fp = fingerprint_snapshot(&page);
-        assert!(verify_step(&page, &fp, &[verification]).is_ok());
+        assert!(verify_step(&page, &fp, &[verification], None).is_ok());
     }
 }
