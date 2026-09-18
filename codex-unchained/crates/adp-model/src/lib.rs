@@ -233,20 +233,9 @@ impl AntigravityClient {
         )))
     }
 
-    pub fn chat_text(
-        &self,
-        model: &str,
-        prompt: &str,
-    ) -> Result<AntigravityResponse, ModelError> {
+    pub fn chat_text(&self, model: &str, prompt: &str) -> Result<AntigravityResponse, ModelError> {
         let output = Command::new(&self.program)
-            .args([
-                "-p",
-                prompt,
-                "--model",
-                model,
-                "--output-format",
-                "json",
-            ])
+            .args(["-p", prompt, "--model", model, "--output-format", "json"])
             .output()
             .map_err(|source| ModelError::CommandStart {
                 program: self.program.clone(),
