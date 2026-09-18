@@ -79,8 +79,7 @@ impl WebClient {
     }
 
     pub fn credential_available(&self) -> bool {
-        env::var(&self.config.api_key_env)
-            .is_ok_and(|value| !value.trim().is_empty())
+        env::var(&self.config.api_key_env).is_ok_and(|value| !value.trim().is_empty())
     }
 
     pub fn api_key_env(&self) -> &str {
