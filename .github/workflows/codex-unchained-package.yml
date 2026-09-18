@@ -85,6 +85,7 @@ jobs:
         run: |
           python "codex-unchained\upstream-patches\apply_0001.py" "$env:CODEX_UPSTREAM_ROOT"
           python "codex-unchained\upstream-patches\apply_0002.py" "$env:CODEX_UPSTREAM_ROOT"
+          python "codex-unchained\upstream-patches\apply_0003.py" "$env:CODEX_UPSTREAM_ROOT"
           git -C "$env:CODEX_UPSTREAM_ROOT" diff --check
 
       - name: Build patched Codex CLI and ADP MCP bridge
@@ -102,7 +103,9 @@ jobs:
         run: |
           $exe = Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs\target\release\codex.exe"
           & $exe --version
-          $help = (& $exe --help | Out-String)\n          if ($help -notmatch "Usage: codex-unchained") { throw "Unchained command identity smoke failed" }\n          $help | Select-Object -First 40
+          $help = (& $exe --help | Out-String)
+          if ($help -notmatch "Usage: codex-unchained") { throw "Unchained command identity smoke failed" }
+          $help | Select-Object -First 40
 
       - name: Assemble patched Codex artifact
         shell: pwsh
