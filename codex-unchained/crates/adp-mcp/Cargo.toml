@@ -13,6 +13,7 @@ adp-agent = { path = "../adp-agent" }
 adp-browser-bridge = { path = "../adp-browser-bridge" }
 adp-browser-broker = { path = "../adp-browser-broker" }
 adp-memory = { path = "../adp-memory" }
+adp-model-router = { path = "../adp-model-router" }
 adp-protocol = { path = "../adp-protocol" }
 adp-web = { path = "../adp-web" }
 serde_json.workspace = true
