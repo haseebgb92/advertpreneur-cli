@@ -298,9 +298,13 @@ async fn next_handler(
     match state.next_command(&provider_id, &session_key).await {
         Ok(command) => (
             StatusCode::OK,
-            Json(serde_json::to_value(NextResponse { command }).unwrap_or_else(|_| json!({
-                "command": null
-            }))),
+            Json(
+                serde_json::to_value(NextResponse { command }).unwrap_or_else(|_| {
+                    json!({
+                        "command": null
+                    })
+                }),
+            ),
         ),
         Err(error) => broker_error_response(error),
     }
@@ -315,7 +319,10 @@ async fn result_handler(
         return error_response(StatusCode::UNAUTHORIZED, "missing broker credentials");
     };
 
-    match state.submit_result(&provider_id, &session_key, result).await {
+    match state
+        .submit_result(&provider_id, &session_key, result)
+        .await
+    {
         Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))),
         Err(error) => broker_error_response(error),
     }
@@ -330,7 +337,10 @@ async fn learn_handler(
         return error_response(StatusCode::UNAUTHORIZED, "missing broker credentials");
     };
 
-    match state.submit_learn(&provider_id, &session_key, request).await {
+    match state
+        .submit_learn(&provider_id, &session_key, request)
+        .await
+    {
         Ok(recorded) => (
             StatusCode::OK,
             Json(json!({"ok": true, "recorded": recorded})),
