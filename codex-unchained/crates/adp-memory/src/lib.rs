@@ -49,6 +49,10 @@ pub struct WorkflowStep {
     #[serde(default)]
     pub verify: Vec<Verification>,
     #[serde(default)]
+    pub expected_before: Option<PageFingerprint>,
+    #[serde(default)]
+    pub expected_after: Option<PageFingerprint>,
+    #[serde(default)]
     pub safe_for_deterministic_replay: bool,
 }
 
