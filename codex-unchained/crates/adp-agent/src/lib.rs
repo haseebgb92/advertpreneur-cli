@@ -1,6 +1,6 @@
 use adp_browser_bridge::BrowserAction;
-use adp_memory::SemanticTarget;
 use adp_browser_broker::{BrokerError, BrokerState};
+use adp_memory::SemanticTarget;
 use adp_model::{ChatMessage, ModelError, OllamaClient};
 use adp_protocol::{Capability, ModelEvent, ToolCall, ToolDescriptor};
 use serde_json::{Value, json};
