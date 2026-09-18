@@ -1,0 +1,20 @@
+[package]
+name = "adp-unchained"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "adp-unchained"
+path = "src/main.rs"
+
+[dependencies]
+adp-agent = { path = "../adp-agent" }
+adp-browser-broker = { path = "../adp-browser-broker" }
+adp-executor = { path = "../adp-executor" }
+adp-memory = { path = "../adp-memory" }
+adp-model = { path = "../adp-model" }
+adp-protocol = { path = "../adp-protocol" }
+clap.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
