@@ -6,6 +6,7 @@ members = [
   "crates/adp-runtime",
   "crates/adp-browser-bridge",
   "crates/adp-browser-broker",
+  "crates/adp-executor",
 ]
 resolver = "2"
 
