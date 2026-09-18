@@ -33,7 +33,8 @@ jobs:
       - name: Apply ADP compatibility surgery
         run: |
           python codex-unchained/upstream-patches/apply_0001.py /tmp/codex
-          python codex-unchained/upstream-patches/apply_0002.py /tmp/codex\n          python codex-unchained/upstream-patches/apply_0003.py /tmp/codex
+          python codex-unchained/upstream-patches/apply_0002.py /tmp/codex
+          python codex-unchained/upstream-patches/apply_0003.py /tmp/codex
       - name: Validate patch formatting
         shell: bash
         run: |
