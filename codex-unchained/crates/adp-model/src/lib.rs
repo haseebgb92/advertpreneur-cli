@@ -379,7 +379,7 @@ pub fn parse_antigravity_models(output: &str) -> Vec<AntigravityModel> {
         .lines()
         .filter_map(|line| {
             let line = line.trim();
-            if line.is_empty() {
+            if line.is_empty() || line.ends_with(':') {
                 return None;
             }
             let mut parts = line.split_whitespace();
