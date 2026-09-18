@@ -64,10 +64,7 @@ impl<'a> WorkflowExecutor<'a> {
             let before = match self.inspect().await {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
-                    return self.finish_repair(
-                        workflow,
-                        stats,
-                        completed,
+                    let divergence = repair_divergence(
                         step,
                         format!("browser inspection failed: {error}"),
                         None,
@@ -75,70 +72,61 @@ impl<'a> WorkflowExecutor<'a> {
                             .as_ref()
                             .map(|value| value.digest.clone()),
                     );
+                    return self.finish_repair(workflow, stats, completed, divergence);
                 }
             };
 
             let before_fingerprint = fingerprint_snapshot(&before);
             let Some(expected_before) = step.expected_before.as_ref() else {
-                return self.finish_repair(
-                    workflow,
-                    stats,
-                    completed,
+                let divergence = repair_divergence(
                     step,
-                    "learned step has no expected pre-action state fingerprint".to_string(),
+                    "learned step has no expected pre-action state fingerprint",
                     Some(before_fingerprint.digest),
                     None,
                 );
+                return self.finish_repair(workflow, stats, completed, divergence);
             };
 
             if before_fingerprint.digest != expected_before.digest {
-                return self.finish_repair(
-                    workflow,
-                    stats,
-                    completed,
+                let divergence = repair_divergence(
                     step,
-                    "browser state differs from the learned workflow".to_string(),
+                    "browser state differs from the learned workflow",
                     Some(before_fingerprint.digest),
                     Some(expected_before.digest.clone()),
                 );
+                return self.finish_repair(workflow, stats, completed, divergence);
             }
 
             if !step.safe_for_deterministic_replay {
-                return self.finish_repair(
-                    workflow,
-                    stats,
-                    completed,
+                let divergence = repair_divergence(
                     step,
-                    "step is not marked safe for deterministic replay".to_string(),
+                    "step is not marked safe for deterministic replay",
                     Some(before_fingerprint.digest),
                     Some(expected_before.digest.clone()),
                 );
+                return self.finish_repair(workflow, stats, completed, divergence);
             }
 
             if step.verify.is_empty() && step.expected_after.is_none() {
-                return self.finish_repair(
-                    workflow,
-                    stats,
-                    completed,
+                let divergence = repair_divergence(
                     step,
-                    "step has no post-action verification".to_string(),
+                    "step has no post-action verification",
                     Some(before_fingerprint.digest),
                     Some(expected_before.digest.clone()),
                 );
+                return self.finish_repair(workflow, stats, completed, divergence);
             }
 
             let action = match action_for_step(step, context) {
                 Ok(action) => action,
                 Err(reason) => {
-                    return self.finish_repair(
-                        workflow,
-                        stats,
-                        completed,
+                    let divergence = repair_divergence(
                         step,
                         reason,
                         Some(before_fingerprint.digest),
                         Some(expected_before.digest.clone()),
                     );
+                    return self.finish_repair(workflow, stats, completed, divergence);
                 }
             };
 
@@ -149,10 +137,7 @@ impl<'a> WorkflowExecutor<'a> {
             {
                 Ok(result) if result.ok => {}
                 Ok(result) => {
-                    return self.finish_repair(
-                        workflow,
-                        stats,
-                        completed,
+                    let divergence = repair_divergence(
                         step,
                         result
                             .error
@@ -160,27 +145,23 @@ impl<'a> WorkflowExecutor<'a> {
                         Some(before_fingerprint.digest),
                         Some(expected_before.digest.clone()),
                     );
+                    return self.finish_repair(workflow, stats, completed, divergence);
                 }
                 Err(error) => {
-                    return self.finish_repair(
-                        workflow,
-                        stats,
-                        completed,
+                    let divergence = repair_divergence(
                         step,
                         format!("browser action failed: {error}"),
                         Some(before_fingerprint.digest),
                         Some(expected_before.digest.clone()),
                     );
+                    return self.finish_repair(workflow, stats, completed, divergence);
                 }
             }
 
             let after = match self.inspect().await {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
-                    return self.finish_repair(
-                        workflow,
-                        stats,
-                        completed,
+                    let divergence = repair_divergence(
                         step,
                         format!("post-action inspection failed: {error}"),
                         None,
@@ -188,6 +169,7 @@ impl<'a> WorkflowExecutor<'a> {
                             .as_ref()
                             .map(|value| value.digest.clone()),
                     );
+                    return self.finish_repair(workflow, stats, completed, divergence);
                 }
             };
 
@@ -195,22 +177,17 @@ impl<'a> WorkflowExecutor<'a> {
             if let Some(expected_after) = step.expected_after.as_ref()
                 && after_fingerprint.digest != expected_after.digest
             {
-                return self.finish_repair(
-                    workflow,
-                    stats,
-                    completed,
+                let divergence = repair_divergence(
                     step,
-                    "post-action browser state differs from learned state".to_string(),
+                    "post-action browser state differs from learned state",
                     Some(after_fingerprint.digest),
                     Some(expected_after.digest.clone()),
                 );
+                return self.finish_repair(workflow, stats, completed, divergence);
             }
 
             if let Err(reason) = verify_step(&after, &after_fingerprint, &step.verify) {
-                return self.finish_repair(
-                    workflow,
-                    stats,
-                    completed,
+                let divergence = repair_divergence(
                     step,
                     reason,
                     Some(after_fingerprint.digest),
@@ -218,6 +195,7 @@ impl<'a> WorkflowExecutor<'a> {
                         .as_ref()
                         .map(|value| value.digest.clone()),
                 );
+                return self.finish_repair(workflow, stats, completed, divergence);
             }
 
             completed += 1;
@@ -259,22 +237,13 @@ impl<'a> WorkflowExecutor<'a> {
         workflow: &Workflow,
         mut stats: RunStats,
         completed: usize,
-        step: &WorkflowStep,
-        reason: String,
-        observed_signature: Option<String>,
-        expected_signature: Option<String>,
+        divergence: ReplayDivergence,
     ) -> ReplayOutcome {
         stats.divergences += 1;
         let _ = self.memory.save_run_stats(&workflow.name, &stats);
 
         ReplayOutcome::NeedsRepair {
-            divergence: ReplayDivergence {
-                step_id: step.id.clone(),
-                reason,
-                observed_signature,
-                expected_signature,
-                recommended_tier: ExecutionTier::LocalModel,
-            },
+            divergence,
             steps_executed: completed,
         }
     }
@@ -283,6 +252,21 @@ impl<'a> WorkflowExecutor<'a> {
         self.memory
             .load_run_stats(workflow_name)
             .unwrap_or_default()
+    }
+}
+
+fn repair_divergence(
+    step: &WorkflowStep,
+    reason: impl Into<String>,
+    observed_signature: Option<String>,
+    expected_signature: Option<String>,
+) -> ReplayDivergence {
+    ReplayDivergence {
+        step_id: step.id.clone(),
+        reason: reason.into(),
+        observed_signature,
+        expected_signature,
+        recommended_tier: ExecutionTier::LocalModel,
     }
 }
 
