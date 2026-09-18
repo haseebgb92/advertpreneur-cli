@@ -128,13 +128,17 @@ impl PageFingerprint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct RunStats {
     pub runs: u64,
     pub deterministic_runs: u64,
+    pub divergences: u64,
     pub local_model_assists: u64,
     pub primary_model_escalations: u64,
     pub learned_repairs: u64,
     pub successful_runs: u64,
+    pub model_input_tokens: u64,
+    pub model_output_tokens: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +177,19 @@ impl ProjectMemory {
         let slug = workflow_slug(name)?;
         let bytes = fs::read(self.root.join("workflows").join(format!("{slug}.json")))?;
         Ok(serde_json::from_slice(&bytes)?)
+    }
+
+    pub fn load_run_stats(&self, workflow_name: &str) -> Result<RunStats, MemoryError> {
+        let slug = workflow_slug(workflow_name)?;
+        let path = self
+            .root
+            .join("workflows")
+            .join(format!("{slug}.stats.json"));
+        match fs::read(path) {
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(RunStats::default()),
+            Err(error) => Err(MemoryError::Io(error)),
+        }
     }
 
     pub fn save_run_stats(
