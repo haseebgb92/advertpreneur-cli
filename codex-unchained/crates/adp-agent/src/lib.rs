@@ -1,7 +1,7 @@
 use adp_browser_bridge::{BrowserAction, SemanticTarget};
 use adp_browser_broker::{BrokerError, BrokerState};
 use adp_model::{ChatMessage, ModelError, OllamaClient};
-use adp_protocol::{Capability, ToolCall, ToolDescriptor};
+use adp_protocol::{Capability, ModelEvent, ToolCall, ToolDescriptor};
 use serde_json::{Value, json};
 use std::time::Duration;
 use thiserror::Error;
@@ -35,6 +35,8 @@ pub struct AgentResult {
     pub final_text: String,
     pub model_turns: usize,
     pub tool_calls: usize,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
 }
 
 #[derive(Debug, Error)]
@@ -102,9 +104,21 @@ impl<'a> AgentRuntime<'a> {
             ChatMessage::user(prompt),
         ];
         let mut total_tool_calls = 0usize;
+        let mut input_tokens = 0u64;
+        let mut output_tokens = 0u64;
 
         for turn in 1..=self.config.max_model_turns {
             let response = self.model.chat(&messages, &tools).await?;
+            for event in &response.events {
+                if let ModelEvent::Usage {
+                    input_tokens: input,
+                    output_tokens: output,
+                } = event
+                {
+                    input_tokens = input_tokens.saturating_add(*input);
+                    output_tokens = output_tokens.saturating_add(*output);
+                }
+            }
             messages.push(response.assistant_message.clone());
 
             if response.tool_calls.is_empty() {
@@ -112,6 +126,8 @@ impl<'a> AgentRuntime<'a> {
                     final_text: response.assistant_text,
                     model_turns: turn,
                     tool_calls: total_tool_calls,
+                    input_tokens,
+                    output_tokens,
                 });
             }
 
