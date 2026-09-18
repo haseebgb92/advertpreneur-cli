@@ -62,11 +62,59 @@ jobs:
         run: |
           python .ci/apply-rust-cleanups.py $env:ADP_RUST_SRC
 
+      - name: Normalize validated Rust base
+        shell: pwsh
+        run: |
+          Set-Location $env:ADP_RUST_SRC
+          cargo fmt
+
+      - name: Apply native UX parity repair
+        shell: pwsh
+        run: |
+          $parts = Get-ChildItem (Join-Path $env:GITHUB_WORKSPACE ".ci\ux-repair-*.patch") | Sort-Object Name
+          if ($parts.Count -ne 4) {
+            throw "Expected 4 UX repair patch chunks, got $($parts.Count)"
+          }
+          $patchText = ($parts | ForEach-Object { [IO.File]::ReadAllText($_.FullName) }) -join ""
+          $patch = Join-Path $env:RUNNER_TEMP "adp-ux-repair.patch"
+          [IO.File]::WriteAllText($patch, $patchText, [Text.UTF8Encoding]::new($false))
+          $hash = (Get-FileHash $patch -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne "7275e3d5892a1a670992dda32592679bc07cbc30460f8542cbe811b3489a13f8") {
+            throw "UX repair patch checksum mismatch: $hash"
+          }
+          Set-Location $env:ADP_RUST_SRC
+          git apply --check $patch
+          git apply $patch
+          Write-Host "Native UX parity repair applied."
+
       - name: Apply canonical Rust formatting
         shell: pwsh
         run: |
           Set-Location $env:ADP_RUST_SRC
           cargo fmt
+
+      - name: Verify UX experience contract
+        shell: pwsh
+        run: |
+          $main = [IO.File]::ReadAllText((Join-Path $env:ADP_RUST_SRC "crates\adp-cli\src\main.rs"))
+          $ui = [IO.File]::ReadAllText((Join-Path $env:ADP_RUST_SRC "crates\adp-cli\src\ui.rs"))
+          $required = @(
+            @($main, "ui::banner"),
+            @($main, "ui::prompt"),
+            @($main, "ui::tool_description"),
+            @($main, "ui::result_card"),
+            @($main, "ui::begin_task"),
+            @($ui, "Message Advertpreneur"),
+            @($ui, "pub fn event"),
+            @($ui, "pub fn result_card"),
+            @($ui, "pub fn set_working")
+          )
+          foreach ($pair in $required) {
+            if (-not $pair[0].Contains($pair[1])) {
+              throw "UX contract missing: $($pair[1])"
+            }
+          }
+          Write-Host "Rust UI experience contract passed."
 
       - name: Verify Rust formatting
         shell: pwsh
