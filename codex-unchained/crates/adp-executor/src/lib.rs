@@ -1,8 +1,8 @@
 use adp_browser_bridge::{BrowserAction, BrowserSnapshot};
 use adp_browser_broker::{BrokerError, BrokerState};
 use adp_memory::{
-    PageFingerprint, ProjectMemory, RunStats, SemanticTarget, TEACH_KEYWORD, Verification, Workflow,
-    WorkflowStep,
+    PageFingerprint, ProjectMemory, RunStats, SemanticTarget, TEACH_KEYWORD, Verification,
+    Workflow, WorkflowStep,
 };
 use adp_protocol::{ExecutionContext, ExecutionTier};
 use serde::{Deserialize, Serialize};
@@ -55,11 +55,7 @@ impl<'a> WorkflowExecutor<'a> {
         }
     }
 
-    pub async fn replay(
-        &self,
-        workflow: &Workflow,
-        context: &ExecutionContext,
-    ) -> ReplayOutcome {
+    pub async fn replay(&self, workflow: &Workflow, context: &ExecutionContext) -> ReplayOutcome {
         let mut stats = self.load_stats(&workflow.name);
         stats.runs += 1;
 
@@ -75,7 +71,9 @@ impl<'a> WorkflowExecutor<'a> {
                         step,
                         format!("browser inspection failed: {error}"),
                         None,
-                        step.expected_before.as_ref().map(|value| value.digest.clone()),
+                        step.expected_before
+                            .as_ref()
+                            .map(|value| value.digest.clone()),
                     );
                 }
             };
@@ -156,7 +154,9 @@ impl<'a> WorkflowExecutor<'a> {
                         stats,
                         completed,
                         step,
-                        result.error.unwrap_or_else(|| "browser action failed".to_string()),
+                        result
+                            .error
+                            .unwrap_or_else(|| "browser action failed".to_string()),
                         Some(before_fingerprint.digest),
                         Some(expected_before.digest.clone()),
                     );
@@ -184,7 +184,9 @@ impl<'a> WorkflowExecutor<'a> {
                         step,
                         format!("post-action inspection failed: {error}"),
                         None,
-                        step.expected_after.as_ref().map(|value| value.digest.clone()),
+                        step.expected_after
+                            .as_ref()
+                            .map(|value| value.digest.clone()),
                     );
                 }
             };
@@ -212,7 +214,9 @@ impl<'a> WorkflowExecutor<'a> {
                     step,
                     reason,
                     Some(after_fingerprint.digest),
-                    step.expected_after.as_ref().map(|value| value.digest.clone()),
+                    step.expected_after
+                            .as_ref()
+                            .map(|value| value.digest.clone()),
                 );
             }
 
@@ -240,7 +244,9 @@ impl<'a> WorkflowExecutor<'a> {
             .map_err(broker_error)?;
 
         if !result.ok {
-            return Err(result.error.unwrap_or_else(|| "inspection failed".to_string()));
+            return Err(result
+                .error
+                .unwrap_or_else(|| "inspection failed".to_string()));
         }
 
         serde_json::from_value::<BrowserSnapshot>(result.result)
@@ -280,7 +286,10 @@ impl<'a> WorkflowExecutor<'a> {
     }
 }
 
-fn action_for_step(step: &WorkflowStep, context: &ExecutionContext) -> Result<BrowserAction, String> {
+fn action_for_step(
+    step: &WorkflowStep,
+    context: &ExecutionContext,
+) -> Result<BrowserAction, String> {
     match step.action.as_str() {
         "click" => Ok(BrowserAction::Click {
             target: required_target(step)?,
@@ -387,7 +396,9 @@ fn verify_step(
                     .as_str()
                     .ok_or_else(|| "url_contains verification must be text".to_string())?;
                 if !snapshot.url.contains(needle) {
-                    return Err(format!("verification failed: URL does not contain '{needle}'"));
+                    return Err(format!(
+                        "verification failed: URL does not contain '{needle}'"
+                    ));
                 }
             }
             "title_contains" => {
