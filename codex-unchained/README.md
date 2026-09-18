@@ -1,6 +1,6 @@
 # ADP Codex Unchained
 
-Provider-neutral Rust execution kernel for ADP. This branch makes the model provider the reasoning engine rather than the owner of Browser, Web, Teach, project memory, or execution capabilities.
+Provider-neutral Rust execution kernel for ADP. The model provider is the reasoning engine; Browser, Web, shell, MCP, Teach, project memory, and execution capabilities belong to Codex Unchained and ADP.
 
 Current branch: `codex-unchained-v0.1`.
 
@@ -9,11 +9,13 @@ Current branch: `codex-unchained-v0.1`.
 The workspace currently contains:
 
 - provider-neutral tool/capability protocol;
-- Ollama local and Ollama Cloud model transport;
+- a unified model router for Ollama Local, Ollama Cloud, and Antigravity;
+- native Codex `/model` switching through one live model catalog;
+- a dedicated Unchained home at `~/.codex-unchained`, separate from normal `~/.codex`;
 - host-owned Chrome/Edge Browser runtime over an authenticated localhost Rust broker;
 - host-owned web search and web fetch tools;
 - semantic `/teach` workflow compilation into `.advertpreneur`;
-- zero-model deterministic workflow replay when the browser state matches;
+- zero-model deterministic workflow replay when browser state matches;
 - local-model repair first, optional primary/cloud repair second;
 - verified repair persistence and resume-after-repair;
 - token/run accounting;
@@ -27,63 +29,134 @@ The normal CI compiles every workspace crate, runs rustfmt, clippy with warnings
 From this directory:
 
 ```powershell
-cargo build -p adp-unchained --release
+cargo build -p adp-unchained -p adp-mcp --release
 .\target\release\adp-unchained.exe --help
 ```
 
-## Ollama local
+## Use the patched Codex Unchained CLI
 
-Make sure Ollama is running, then:
+The Windows package contains:
 
-```powershell
-adp-unchained doctor --provider local --model qwen3:1.7b
-adp-unchained chat --provider local --model qwen3:1.7b "Say hello and report your available host tools."
-```
+- `codex-unchained.exe`;
+- `adp-mcp.exe`;
+- the unpacked Chrome/Edge extension;
+- the brain-only Antigravity agent;
+- `INSTALL-CODEX-WINDOWS.ps1`.
 
-Cloud models exposed through your signed-in local Ollama daemon can still be selected with `--provider local`; the CLI talks to the local daemon and does not need an OpenAI API key.
-
-## Browser
-
-Load `extension/` as an unpacked Chrome or Edge extension.
-
-Then:
-
-```powershell
-adp-unchained chat --browser --provider local --model qwen3:1.7b "Inspect the current page and summarize it."
-```
-
-Browser execution happens in the user's already-open browser profile through `127.0.0.1:8765`. The model receives semantic controls rather than raw form values.
-
-## Web
-
-Host web search/fetch is independent of the reasoning model. Set the Ollama web credential:
-
-```powershell
-$env:OLLAMA_API_KEY = "..."
-adp-unchained web-search "latest Rust release"
-adp-unchained web-fetch "https://example.com/"
-adp-unchained chat --web --provider local --model qwen3:1.7b "Research the latest Rust release and summarize it."
-```
-
-This means a small local model can request web search even though the model itself has no built-in web implementation. Without a web API credential, browser tools remain available for browser-driven research.
-
-## Use the real patched Codex CLI
-
-The Windows patched-Codex package contains `codex-unchained.exe` and `adp-mcp.exe` side-by-side. Install it with:
+Install it with:
 
 ```powershell
 .\INSTALL-CODEX-WINDOWS.ps1 -AddToPath
 ```
 
-The installer writes `CODEX-MCP-CONFIG.toml` with the exact installed `adp-mcp.exe` path. Copy that block into your Codex `config.toml`.
+The installer creates and owns:
 
-Then load the packaged `extension/` folder as an unpacked Chrome/Edge extension and run, for example:
-
-```powershell
-codex-unchained --oss -m qwen3:1.7b
+```text
+~/.codex-unchained/
+    config.toml
+    sessions/
+    history/
+    ...
 ```
 
-Inside that Codex session, ADP Browser/Web are MCP host tools. The Ollama model chooses when to request them; `adp-mcp.exe` performs the work. This is the bridge that removes Browser/Web availability from the model-provider boundary.
+Normal Codex continues to use `~/.codex`. The installer does not create or modify the normal Codex home.
+
+The generated Unchained config points Codex at the local ADP model router on `127.0.0.1:8766` and registers `adp-mcp.exe`. Load the packaged `extension/` folder as an unpacked Chrome/Edge extension, then launch:
+
+```powershell
+codex-unchained
+```
+
+No provider flags are required for normal use.
+
+## /model
+
+Inside Codex Unchained:
+
+```text
+/model
+```
+
+uses Codex's native model picker. The ADP model router supplies a live catalog with namespaced entries:
+
+```text
+[Ollama Local] ...
+[Ollama Cloud] ...
+[Antigravity] ...
+```
+
+The model changes; the agent and host tools do not.
+
+### Ollama Local
+
+Local models are discovered from the running Ollama daemon on `127.0.0.1:11434`.
+
+The default fresh-install model is:
+
+```text
+ollama-local/qwen3:1.7b
+```
+
+### Ollama Cloud
+
+Cloud models are discovered dynamically from Ollama's current cloud catalog rather than hard-coded into ADP. A selected cloud model is prepared through the signed-in local Ollama daemon and then uses the same Responses-compatible route as local Ollama.
+
+### Antigravity
+
+Antigravity models are discovered dynamically through the user's existing authenticated `agy` CLI session.
+
+The installer adds a dedicated global custom agent:
+
+```text
+~/.gemini/config/agents/adp-unchained-brain/agent.md
+```
+
+That agent has no Antigravity-native tools. Antigravity acts only as the reasoning backend and returns a schema-constrained decision: either a final message or one Codex host-tool request. Codex Unchained remains responsible for Browser, shell, MCP, approvals, and tool execution.
+
+## Browser
+
+The packaged extension talks to the ADP browser broker on:
+
+```text
+127.0.0.1:8765
+```
+
+Browser execution happens in the user's already-open Chrome/Edge profile. The model receives semantic controls rather than raw form values.
+
+A useful first test inside `codex-unchained` is:
+
+```text
+Use the ADP browser tools to inspect the active browser tab. Tell me the title,
+URL, and visible interactive elements. Do not click or modify anything.
+```
+
+## Model router
+
+`adp-mcp.exe` hosts two local services:
+
+```text
+127.0.0.1:8765  ADP browser broker
+127.0.0.1:8766  Codex Unchained model router
+```
+
+The router exposes a Codex-compatible `/v1/models` catalog and `/v1/responses` route. Ollama requests are proxied through the local daemon. Antigravity requests are translated between Codex Responses events and the authenticated `agy` headless interface.
+
+This keeps the invariant:
+
+```text
+switch the brain
+do not switch the agent
+```
+
+## Web
+
+Host web search/fetch is independent of the reasoning model. If using ADP's Ollama-backed host web endpoint, set:
+
+```powershell
+$env:OLLAMA_API_KEY = "..."
+```
+
+Browser tools remain available without that web credential.
 
 ## Teach and replay
 
@@ -101,7 +174,7 @@ Replay it later:
 adp-unchained replay helium-export --project D:\MyProject --keyword "bee wax wrap"
 ```
 
-Replay first tries the learned workflow with zero model calls. On state divergence it can use the configured local Ollama repair model. A primary/cloud repair model is only used when explicitly configured and local repair fails. Repairs are saved only after verification.
+Replay first tries the learned workflow with zero model calls. On state divergence it can use the configured local repair model. A primary/cloud repair model is only used when configured and local repair fails. Repairs are saved only after verification.
 
 ## Privacy and safety of learned workflows
 
@@ -113,30 +186,30 @@ Potentially consequential clicks are learned but are not marked safe for determi
 
 `upstream-patches/` pins an exact OpenAI Codex revision and contains reproducible source transformations that:
 
-1. accept `tool_search` from compatible providers as an ordinary function call and return its result as a matching function-call output, while preserving native Codex's specialized tool-search wire format;
-2. stop unknown/custom model fallback metadata from automatically disabling local tool discovery and skill/plugin/app guidance.
+1. preserve provider wire dialect for `tool_search`, supporting both native specialized calls and compatible function-call providers;
+2. keep local tool discovery plus skill/plugin/app guidance enabled for unknown/custom model fallback metadata;
+3. give the patched distribution its own `~/.codex-unchained` home and `codex-unchained` command identity.
 
-`.github/workflows/codex-upstream-compat.yml` fetches the pinned upstream revision, applies both transformations, checks formatting, and runs focused upstream Codex tests.
+`.github/workflows/codex-upstream-compat.yml` fetches the pinned upstream revision, applies all transformations, checks formatting, and runs focused upstream Codex tests.
 
-The ADP Browser/Web runtimes remain ADP-owned rather than depending on a proprietary browser helper.
+The ADP Browser/Web runtimes remain ADP-owned rather than depending on a proprietary browser helper. Codex approval and sandbox machinery is retained.
 
 ## Windows package
 
-The branch packaging workflow builds:
+The packaging workflow builds two artifacts:
 
-- `adp-unchained.exe`;
-- the unpacked Chrome/Edge extension;
-- this README;
-- `INSTALL-WINDOWS.ps1`.
+- `adp-unchained-windows-x64`;
+- `patched-codex-windows-x64`.
 
-Run the installer with:
+The patched package smoke-tests:
 
-```powershell
-.\INSTALL-WINDOWS.ps1 -AddToPath
-```
-
-A separate job also attempts a reproducible Windows build of the pinned patched upstream `codex.exe` after applying the compatibility transformations.
+- upstream patch application;
+- `codex-unchained` command identity;
+- ADP MCP/model-router compilation;
+- isolated installer behavior;
+- dedicated `~/.codex-unchained` config generation;
+- no creation of normal `~/.codex` by the installer.
 
 ## Branch isolation
 
-This implementation is intentionally isolated from `main`. It does not overwrite the older Python ADP tree or any newer local Rust migration that has not been pushed to GitHub.
+This implementation remains intentionally isolated from `main`. It does not overwrite the older Python ADP tree or any newer local Rust migration that has not been pushed to GitHub.
