@@ -1,0 +1,175 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -12,7 +12,7 @@
+ ]
+ 
+ [workspace.package]
+-version = "0.30.0-alpha.1"
++version = "0.30.0-alpha.2"
+ edition = "2021"
+ license = "Proprietary"
+ authors = ["Advertpreneur"]
+--- a/crates/adp-cli/src/main.rs
++++ b/crates/adp-cli/src/main.rs
+@@ -1,5 +1,6 @@
+ mod provider_health;
+ mod updater;
++mod ui;
+ mod web_tools;
+ 
+ use adp_browser::{BrowserRoutineStore, BrowserState, DEFAULT_PORT};
+@@ -491,19 +492,25 @@
+         let _ = cancel_tx.send(());
+     })
+     .map_err(|e| anyhow!("failed to install Ctrl+C handler: {e}"))?;
+-    println!("\nAdvertpreneur CLI {} · Rust runtime", VERSION);
+-    println!("Project · {}", paths.project.display());
+-    println!("Memory  · {}", paths.store.display());
++    ui::banner(VERSION, &paths.project);
+     println!(
+-        "Session · {} · {}",
++        "  Session · {} · {}",
+         short_session_id(&session.id),
+         session.name
+     );
+-    println!("Type /help for commands.\n");
++    println!("  Memory  · {}\n", paths.store.display());
+     let _ = refresh_index(&paths, false);
+     loop {
+-        print!("› ");
+-        io::stdout().flush()?;
++        let pressure = ResourceGuard::new(&paths.project, "")?
++            .system_snapshot(false)
++            .pressure
++            .to_ascii_uppercase();
++        ui::prompt(
++            &provider,
++            &model,
++            browser.first_provider().is_some(),
++            &pressure,
++        )?;
+         let mut raw = String::new();
+         match io::stdin().read_line(&mut raw) {
+             Ok(0) => break,
+@@ -705,7 +712,7 @@
+             println!("exit {}", status.code().unwrap_or(-1));
+             continue;
+         }
+-        if let Err(e) = run_task_cancellable(
++        let _ = run_task_cancellable(
+             &paths,
+             &browser,
+             raw,
+@@ -715,10 +722,7 @@
+             &mut session,
+             &mut cancel_rx,
+         )
+-        .await
+-        {
+-            eprintln!("Error · {e:#}");
+-        }
++        .await;
+     }
+     if session.requests == 0 && session.turns.is_empty() {
+         let _ = store.delete(&session.id);
+@@ -1903,6 +1907,10 @@
+                 latest
+             );
+         }
++        ui::set_working(
++            "thinking",
++            &format!("{}{} · turn {}", provider, if model.is_empty() { String::new() } else { format!("/{model}") }, turn + 1),
++        );
+         let resp = backend(provider, model).run(&q, &work).await?;
+         total.input_tokens = total.input_tokens.saturating_add(resp.input_tokens);
+         total.cached_tokens = total.cached_tokens.saturating_add(resp.cached_tokens);
+@@ -1926,9 +1934,17 @@
+                 .and_then(Value::as_str)
+                 .ok_or_else(|| anyhow!("ADP_ACTION missing tool"))?;
+             let args = v.get("args").cloned().unwrap_or_else(|| json!({}));
++            let (ui_label, ui_detail) = ui::tool_description(tool, &args);
++            ui::set_working("acting", &ui_detail);
+             let row = match execute_adp_action(paths, browser, &gateway, tool, &args).await {
+-                Ok(x) => json!({"ok":true,"tool":tool,"result":x}),
+-                Err(e) => json!({"ok":false,"tool":tool,"error":e.to_string()}),
++                Ok(x) => {
++                    ui::event(&ui_label, &ui_detail, Some(true));
++                    json!({"ok":true,"tool":tool,"result":x})
++                }
++                Err(e) => {
++                    ui::event(&ui_label, &format!("{} · {}", ui_detail, e), Some(false));
++                    json!({"ok":false,"tool":tool,"error":e.to_string()})
++                }
+             };
+             let cap = if tool.starts_with("fs.") || tool == "shell.run" {
+                 6000
+@@ -2011,6 +2027,7 @@
+             Ok(())
+         }
+         Err(e) => {
++            ui::failure(&e.to_string());
+             if let Some(rec) = session.as_deref_mut() {
+                 rec.fail_task(&e.to_string());
+                 if let Some(store) = store {
+@@ -2064,12 +2081,14 @@
+             Ok(())
+         }
+         Some(Err(e)) => {
++            ui::failure(&e.to_string());
+             session.fail_task(&e.to_string());
+             let _ = store.save(session);
+             let _ = store.set_current(&session.id);
+             Err(e)
+         }
+         None => {
++            ui::end_task();
+             session.fail_task("cancelled by Ctrl+C");
+             store.save(session)?;
+             store.set_current(&session.id)?;
+@@ -2089,11 +2108,8 @@
+ ) -> Result<TaskSessionOutcome> {
+     let started = std::time::Instant::now();
+     let route = route_task(task);
+-    println!(
+-        "Route · {} · {}",
+-        route.kind,
+-        route.capabilities.join(" + ")
+-    );
++    ui::begin_task(provider, model, "preparing task", task);
++    ui::route(&route.kind, &route.capabilities);
+     let routine_store = BrowserRoutineStore::new(paths.store.join("browser"))?;
+     if let Some(matched) = routine_store.match_request(task) {
+         match routine_store
+@@ -2103,9 +2119,16 @@
+             Ok(summary) => {
+                 let text = summary.to_string();
+                 let validations = vec!["taught browser routine verified".into()];
+-                println!(
+-                    "{text}\nlocal taught workflow · 0 model requests · 0 tokens · {:.2}s",
+-                    started.elapsed().as_secs_f32()
++                ui::event("Browser", "taught workflow replay verified", Some(true));
++                ui::end_task();
++                ui::result_card(
++                    &text,
++                    &[],
++                    0,
++                    &validations,
++                    "local",
++                    "deterministic-routine",
++                    started.elapsed().as_secs_f32(),
+                 );
+                 record_task(paths, task, &text, vec![], validations.clone(), vec![])?;
+                 return Ok(TaskSessionOutcome {
+@@ -2117,7 +2140,11 @@
+                 });
+             }
+             Err(e) => {
+-                println!("Taught workflow stopped safely · {e} · escalating with compact context")
++                ui::event(
++                    "Browser",
++                    &format!("taught workflow stopped safely · {e} · escalating"),
++                    Some(false),
++                );
+             }
+         }
+     }
