@@ -1,7 +1,7 @@
-use adp_browser_bridge::{BrowserAction, BrowserSnapshot, LearnEvent, TEACH_KEYWORD};
+use adp_browser_bridge::{BrowserAction, BrowserSnapshot, LearnEvent};
 use adp_browser_broker::{BrokerError, BrokerState, LearnEnvelope};
 use adp_executor::fingerprint_snapshot;
-use adp_memory::{ProjectMemory, Verification, Workflow, WorkflowStep};
+use adp_memory::{ProjectMemory, TEACH_KEYWORD, Verification, Workflow, WorkflowStep};
 use serde_json::json;
 use std::time::Duration;
 use thiserror::Error;
@@ -78,7 +78,7 @@ impl<'a> TeachRecorder<'a> {
         workflow.protected_tabs = json!({
             "primary": {
                 "tab_id": tab_id,
-                "start_url": previous_snapshot.url
+                "start_url": previous_snapshot.url.clone()
             }
         });
         memory.save_workflow(&workflow)?;
