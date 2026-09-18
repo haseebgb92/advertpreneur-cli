@@ -37,6 +37,14 @@ pub struct AgentResult {
     pub tool_calls: usize,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub executed_tools: Vec<ToolExecutionRecord>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolExecutionRecord {
+    pub call: ToolCall,
+    pub ok: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -49,6 +57,8 @@ pub enum AgentError {
     InvalidArguments { tool: String, message: String },
     #[error("browser tool '{0}' is not registered")]
     UnknownTool(String),
+    #[error("browser command failed: {0}")]
+    BrowserCommand(String),
     #[error("agent reached the model-turn limit before producing a final response")]
     TurnLimit,
 }
@@ -58,6 +68,7 @@ pub struct AgentRuntime<'a> {
     broker: &'a BrokerState,
     browser_provider_id: Option<String>,
     browser_tab_id: Option<i64>,
+    allowed_tool_names: Option<Vec<String>>,
     config: AgentConfig,
 }
 
@@ -68,6 +79,7 @@ impl<'a> AgentRuntime<'a> {
             broker,
             browser_provider_id: None,
             browser_tab_id: None,
+            allowed_tool_names: None,
             config: AgentConfig::default(),
         }
     }
@@ -87,12 +99,24 @@ impl<'a> AgentRuntime<'a> {
         self
     }
 
+    pub fn with_allowed_tools(
+        mut self,
+        tool_names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.allowed_tool_names = Some(tool_names.into_iter().map(Into::into).collect());
+        self
+    }
+
     pub fn tool_inventory(&self) -> Vec<ToolDescriptor> {
-        if self.browser_provider_id.is_some() {
-            browser_tools()
-        } else {
-            Vec::new()
+        if self.browser_provider_id.is_none() {
+            return Vec::new();
         }
+
+        let mut tools = browser_tools();
+        if let Some(allowed) = &self.allowed_tool_names {
+            tools.retain(|tool| allowed.iter().any(|name| name == &tool.name));
+        }
+        tools
     }
 
     pub async fn run(&self, prompt: &str) -> Result<AgentResult, AgentError> {
@@ -106,6 +130,7 @@ impl<'a> AgentRuntime<'a> {
         let mut total_tool_calls = 0usize;
         let mut input_tokens = 0u64;
         let mut output_tokens = 0u64;
+        let mut executed_tools = Vec::new();
 
         for turn in 1..=self.config.max_model_turns {
             let response = self.model.chat(&messages, &tools).await?;
@@ -128,18 +153,39 @@ impl<'a> AgentRuntime<'a> {
                     tool_calls: total_tool_calls,
                     input_tokens,
                     output_tokens,
+                    executed_tools,
                 });
             }
 
             total_tool_calls += response.tool_calls.len();
             for call in response.tool_calls {
+                let tool_name = call.name.clone();
+                let trace_call = call.clone();
                 let result = self.dispatch_tool(&call).await;
-                let wire = match result {
-                    Ok(value) => json!({"ok": true, "result": value}),
-                    Err(error) => json!({"ok": false, "error": error.to_string()}),
+                let (wire, record) = match result {
+                    Ok(value) => (
+                        json!({"ok": true, "result": value}),
+                        ToolExecutionRecord {
+                            call: trace_call,
+                            ok: true,
+                            error: None,
+                        },
+                    ),
+                    Err(error) => {
+                        let message = error.to_string();
+                        (
+                            json!({"ok": false, "error": message}),
+                            ToolExecutionRecord {
+                                call: trace_call,
+                                ok: false,
+                                error: Some(error.to_string()),
+                            },
+                        )
+                    }
                 };
+                executed_tools.push(record);
                 messages.push(ChatMessage::tool(
-                    call.name,
+                    tool_name,
                     truncate(&wire.to_string(), MAX_TOOL_RESULT_CHARS),
                 ));
             }
@@ -194,11 +240,11 @@ impl<'a> AgentRuntime<'a> {
         if result.ok {
             Ok(result.result)
         } else {
-            Ok(json!({
-                "browser_error": result
+            Err(AgentError::BrowserCommand(
+                result
                     .error
-                    .unwrap_or_else(|| "browser action failed".to_string())
-            }))
+                    .unwrap_or_else(|| "browser action failed".to_string()),
+            ))
         }
     }
 }
