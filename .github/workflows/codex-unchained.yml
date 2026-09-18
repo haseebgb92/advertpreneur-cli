@@ -26,6 +26,11 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - name: Smoke runnable CLI
+        run: |
+          cargo run -p adp-unchained -- --help
+          cargo run -p adp-unchained -- web-search --help
+          cargo run -p adp-unchained -- replay --help
 
   extension-syntax:
     runs-on: ubuntu-latest
