@@ -10,7 +10,7 @@ ADP Codex Unchained integrates with upstream Codex in two layers.
 
 ## Layer 1: provider compatibility surgery
 
-`upstream-patches/apply_0001.py` patches the Codex `ToolRouter` boundary so a compatible custom provider that emits `tool_search` as an ordinary function call is normalized into the same client-side `ToolPayload::ToolSearch` path used by native Codex responses.
+`upstream-patches/apply_0001.py` makes client-side tool search bidirectional across provider dialects. Native Codex `tool_search_call` keeps the specialized `ToolSearch` payload/output path. A compatible provider that emits `tool_search` as an ordinary function call keeps a normal Function payload; the search handler parses it, and the result is returned as a normal `function_call_output`.
 
 `upstream-patches/apply_0002.py` changes fallback metadata for unknown/custom models so they are not automatically admitted with local tool discovery and skill/plugin/app guidance disabled.
 
