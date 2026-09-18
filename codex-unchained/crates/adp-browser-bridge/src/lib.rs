@@ -91,6 +91,8 @@ pub struct LearnEvent {
     #[serde(default)]
     pub selector_hint: String,
     #[serde(default)]
+    pub target: Option<SemanticTarget>,
+    #[serde(default)]
     pub value: Option<String>,
     #[serde(default)]
     pub evidence: Value,
@@ -142,6 +144,7 @@ mod tests {
         let event = LearnEvent {
             action: "fill".into(),
             selector_hint: "input[name=keyword]".into(),
+            target: None,
             value: Some("bee wax wrap".into()),
             evidence: json!({
                 "url": "https://example.com/search?q=private",
@@ -160,6 +163,7 @@ mod tests {
         let sensitive = LearnEvent {
             action: "fill".into(),
             selector_hint: "#password".into(),
+            target: None,
             value: Some("secret".into()),
             evidence: Value::Null,
         };
@@ -168,6 +172,7 @@ mod tests {
         let arbitrary = LearnEvent {
             action: "fill".into(),
             selector_hint: "#address".into(),
+            target: None,
             value: Some("home".into()),
             evidence: Value::Null,
         };
