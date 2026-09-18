@@ -49,7 +49,6 @@ pub struct ExecutionPlanner {
     pub budget: ExecutionBudget,
 }
 
-
 impl ExecutionPlanner {
     pub fn decide(&self, input: &PlannerInput) -> ExecutionDecision {
         if input.workflow_available
