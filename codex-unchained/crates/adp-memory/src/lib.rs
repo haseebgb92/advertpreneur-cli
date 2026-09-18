@@ -17,6 +17,8 @@ pub enum MemoryError {
     Json(#[from] serde_json::Error),
     #[error("invalid workflow name")]
     InvalidWorkflowName,
+    #[error("workflow repairs must be verified before they are persisted")]
+    UnverifiedRepair,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -59,6 +61,8 @@ pub struct WorkflowStep {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowRepair {
     pub observed_signature: String,
+    #[serde(default)]
+    pub after_signature: Option<String>,
     pub step_id: String,
     pub previous_target: Option<SemanticTarget>,
     pub repaired_target: Option<SemanticTarget>,
@@ -190,6 +194,31 @@ impl ProjectMemory {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(RunStats::default()),
             Err(error) => Err(MemoryError::Io(error)),
         }
+    }
+
+    pub fn save_verified_repair(
+        &self,
+        workflow_name: &str,
+        repair: WorkflowRepair,
+    ) -> Result<Workflow, MemoryError> {
+        if !repair.verified {
+            return Err(MemoryError::UnverifiedRepair);
+        }
+
+        let mut workflow = self.load_workflow(workflow_name)?;
+        workflow.repairs.retain(|existing| {
+            existing.step_id != repair.step_id
+                || existing.observed_signature != repair.observed_signature
+        });
+        workflow.repairs.push(repair);
+        workflow.version = workflow.version.saturating_add(1);
+        self.save_workflow(&workflow)?;
+
+        let mut stats = self.load_run_stats(workflow_name)?;
+        stats.learned_repairs = stats.learned_repairs.saturating_add(1);
+        self.save_run_stats(workflow_name, &stats)?;
+
+        Ok(workflow)
     }
 
     pub fn save_run_stats(
