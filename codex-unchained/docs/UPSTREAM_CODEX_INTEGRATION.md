@@ -1,33 +1,81 @@
-# Upstream Codex integration plan
+# Upstream Codex integration
 
-Reference upstream inspected: `openai/codex` current `main` on 2026-09-18.
+Pinned upstream revision:
 
-## Why the seam is viable
+```
+7498521d288b9b3b96ffba4eedf089d8d6e06a84
+```
 
-Current Codex Rust already separates `ToolRouter`, model-visible tool specs, executable runtimes, provider capabilities, Ollama/LM Studio support, extensions, skills, MCP, and web search.
+ADP Codex Unchained integrates with upstream Codex in two layers.
 
-The liberation patch should therefore stay small and surgical.
+## Layer 1: provider compatibility surgery
 
-## Rules
+`upstream-patches/apply_0001.py` patches the Codex `ToolRouter` boundary so a compatible custom provider that emits `tool_search` as an ordinary function call is normalized into the same client-side `ToolPayload::ToolSearch` path used by native Codex responses.
 
-1. Provider identity never removes an ADP capability.
-2. Decide tool representation from invocation dialect: native function calls, structured JSON fallback, or unsupported.
-3. Normalize provider wire calls into one internal tool call before routing.
-4. Keep browser, computer-use, shell, MCP and ADP-native functions in host runtimes.
-5. Load `.advertpreneur` as project/session state and retrieve only the relevant fragment for a model turn.
-6. Repeat tasks escalate in this order: deterministic replay -> local model repair -> primary/cloud model.
-7. Persist only verified successful repairs.
+`upstream-patches/apply_0002.py` changes fallback metadata for unknown/custom models so they are not automatically admitted with local tool discovery and skill/plugin/app guidance disabled.
 
-## First upstream targets
+The compatibility CI fetches the exact pinned source, applies both transformations, runs `git diff --check`, runs rustfmt, and executes focused upstream tests.
 
-- `codex-rs/core/src/tools/router.rs`
-- `codex-rs/core/src/config/mod.rs`
-- `codex-rs/model-provider*`
-- `codex-rs/tools`
-- `codex-rs/ollama`
+## Layer 2: ADP host tools over MCP
 
-The first Codex patch should prove that an Ollama-capable adapter receives the same Browser/MCP inventory as another function-calling provider and that a normal function call named `tool_search` can enter the same local discovery path when its arguments satisfy the tool-search contract.
+The `adp-mcp` Rust binary is a local stdio MCP server intended to be registered in Codex:
 
-## Browser/computer note
+```toml
+[mcp_servers.adp]
+command = "C:\\Users\\YOUR_USER\\AppData\\Local\\Advertpreneur\\Unchained\\adp-mcp.exe"
+startup_timeout_sec = 20
+```
 
-Apache-2.0 covers the public Codex repository. It should not be assumed to cover every separately bundled desktop helper or plugin. This prototype therefore keeps an ADP-owned MV3 existing-browser bridge. If an installed Codex Browser/Computer runtime later exposes a lawful public integration surface, we can add an adapter without making that runtime a redistribution dependency.
+Codex namespaces these tools as MCP tools while the implementation remains outside the model provider.
+
+The MCP bridge exposes the ADP Browser tools and ADP Web tools. It starts the localhost Browser broker on `127.0.0.1:8765`, accepts the Chrome/Edge extension, and routes semantic Browser commands through that existing logged-in browser session. Web search and fetch are host operations and therefore do not require the reasoning model itself to implement web browsing.
+
+This is the intended path for running an Ollama-backed Codex session while retaining Browser/Web capabilities:
+
+```text
+Ollama model
+    |
+patched Codex ToolRouter
+    |
+MCP tool discovery
+    |
+adp-mcp.exe
+    |----------------------|
+ADP Browser           ADP Web
+    |                      |
+Chrome/Edge           web search/fetch
+```
+
+## Capability ownership
+
+Provider identity does not decide whether an ADP capability exists.
+
+The model is responsible for deciding when to request an action. Host runtimes perform the action and return the observation. The same Browser/Web runtime can therefore be used by a small local Qwen model, an Ollama cloud model, or another compatible provider.
+
+## Project memory and replay
+
+`.advertpreneur` is runtime/project state rather than prompt history. Taught workflows store semantic targets, before/after state fingerprints, verification rules, and safe runtime variables.
+
+The repeat-work execution ladder is:
+
+1. deterministic replay when the learned browser state still matches;
+2. local model repair for bounded semantic divergence;
+3. optional configured primary/cloud repair only if local repair fails;
+4. persist a repair only after post-action verification;
+5. resume the remaining deterministic workflow.
+
+## Browser and Computer Use boundary
+
+The public OpenAI Codex repository is Apache-2.0, but ADP does not assume every separately distributed Browser/Computer helper is redistributable. The ADP Browser runtime is therefore an independent MV3 Chrome/Edge bridge rather than a copied proprietary helper.
+
+Codex safety/approval controls are not removed by these patches. The compatibility change expands which reasoning providers can access host tools; it does not disable consequential-action controls.
+
+## Validation
+
+The branch has separate CI surfaces:
+
+- `codex-unchained.yml`: entire ADP Rust workspace, rustfmt, clippy with warnings denied, all tests, extension syntax, and runnable CLI smoke checks.
+- `codex-upstream-compat.yml`: exact pinned upstream Codex transformations plus focused upstream tests.
+- `codex-unchained-package.yml`: Windows ADP runtime package and a patched upstream Codex Windows build.
+
+The Windows patched-Codex artifact is deliberately named `codex-unchained.exe` so it can coexist with a normal installed `codex.exe`.
