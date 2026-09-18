@@ -5,6 +5,7 @@ use adp_agent::{
 use adp_browser_bridge::BrowserAction;
 use adp_browser_broker::{BrokerState, serve};
 use adp_memory::SemanticTarget;
+use adp_model_router::{MODEL_ROUTER_ADDR, ModelRouterState, serve as serve_model_router};
 use adp_protocol::ToolDescriptor;
 use adp_web::WebClient;
 use serde_json::{Value, json};
@@ -25,6 +26,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(async move {
         if let Err(error) = serve(listener, broker_server).await {
             eprintln!("ADP MCP browser broker stopped: {error}");
+        }
+    });
+
+    let model_listener = TcpListener::bind(MODEL_ROUTER_ADDR).await?;
+    let model_state = ModelRouterState::new()?;
+    tokio::spawn(async move {
+        if let Err(error) = serve_model_router(model_listener, model_state).await {
+            eprintln!("ADP model router stopped: {error}");
         }
     });
 
@@ -102,7 +111,7 @@ async fn handle_request(broker: &BrokerState, web: &WebClient, request: Value) -
                     "name": "adp-unchained",
                     "version": env!("CARGO_PKG_VERSION")
                 },
-                "instructions": "ADP host tools provide Browser and Web capabilities independently of the model provider."
+                "instructions": "ADP host tools provide Browser and Web capabilities independently of the model provider. The same host process serves the Unchained model catalog on 127.0.0.1:8766."
             }))
         }
         "ping" => Ok(json!({})),
