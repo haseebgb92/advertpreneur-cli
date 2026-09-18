@@ -32,6 +32,7 @@ pub struct BrowserSnapshot {
     pub title: String,
     #[serde(default)]
     pub elements: Vec<SemanticElement>,
+    #[serde(default)]
     pub page_signature: Option<String>,
 }
 
