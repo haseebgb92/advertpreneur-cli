@@ -1,0 +1,175 @@
++        while !thread_rt.stop.load(Ordering::Acquire) {
++            thread::sleep(Duration::from_millis(125));
++            if thread_rt.stop.load(Ordering::Acquire) {
++                break;
++            }
++            render_live(&thread_rt);
++        }
++    });
++    *rt.handle.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
++}
++
++pub fn set_working(label: &str, detail: &str) {
++    let rt = runtime();
++    {
++        let mut state = rt.state.lock().unwrap_or_else(|e| e.into_inner());
++        if !state.active {
++            return;
++        }
++        state.label = label.to_string();
++        state.detail = detail.chars().take(180).collect();
++    }
++    render_live(rt);
++}
++
++pub fn event(label: &str, detail: &str, ok: Option<bool>) {
++    let rt = runtime();
++    let _guard = rt.write_lock.lock().unwrap_or_else(|e| e.into_inner());
++    pad_clear(rt);
++    let icon = match ok {
++        Some(true) => paint(rt, GREEN, "✓"),
++        Some(false) => paint(rt, RED, "✕"),
++        None => paint(rt, BLUE, "↳"),
++    };
++    let label = match label.to_ascii_lowercase().as_str() {
++        "write" | "edit" => paint(rt, GREEN, label),
++        "read" | "search" | "fetch" => paint(rt, ORANGE, label),
++        "browser" => paint(rt, BLUE, label),
++        "bash" | "command" => paint(rt, PINK, label),
++        "verify" => paint(rt, PURPLE, label),
++        _ => label.to_string(),
++    };
++    if detail.trim().is_empty() {
++        println!("  {icon} {label}");
++    } else {
++        println!("  {icon} {label} · {}", detail.chars().take(220).collect::<String>());
++    }
++}
++
++pub fn route(kind: &str, capabilities: &[String]) {
++    event(
++        "Route",
++        &format!("{} · {}", kind, capabilities.join(" + ")),
++        None,
++    );
++}
++
++pub fn result_card(
++    summary: &str,
++    files: &[String],
++    actions: u64,
++    validations: &[String],
++    provider: &str,
++    model: &str,
++    duration: f32,
++) {
++    let rt = runtime();
++    let _guard = rt.write_lock.lock().unwrap_or_else(|e| e.into_inner());
++    let title = format!("{} Advertpreneur result · Completed", paint(rt, GREEN, "✓"));
++    println!("\n  {title}");
++    let summary = summary.trim();
++    if !summary.is_empty() {
++        for line in summary.lines().take(80) {
++            println!("    {line}");
++        }
++    }
++    if !files.is_empty() {
++        println!("    Files · {}", files.iter().take(8).cloned().collect::<Vec<_>>().join(", "));
++    }
++    if actions > 0 {
++        println!("    Actions · {actions}");
++    }
++    if !validations.is_empty() {
++        println!("    Verification · {}", validations.iter().take(4).cloned().collect::<Vec<_>>().join(" · "));
++    }
++    let pm = if model.trim().is_empty() {
++        provider.to_string()
++    } else {
++        format!("{provider}/{model}")
++    };
++    println!("    Run · {pm} · {duration:.1}s");
++}
++
++pub fn failure(message: &str) {
++    end_task();
++    event("Needs attention", message, Some(false));
++}
++
++pub fn end_task() {
++    let rt = runtime();
++    let was_active = {
++        let state = rt.state.lock().unwrap_or_else(|e| e.into_inner());
++        state.active
++    };
++    if !was_active {
++        return;
++    }
++    rt.stop.store(true, Ordering::Release);
++    if let Some(handle) = rt.handle.lock().unwrap_or_else(|e| e.into_inner()).take() {
++        let _ = handle.join();
++    }
++    {
++        let mut state = rt.state.lock().unwrap_or_else(|e| e.into_inner());
++        state.active = false;
++    }
++    let _guard = rt.write_lock.lock().unwrap_or_else(|e| e.into_inner());
++    pad_clear(rt);
++}
++
++pub fn tool_description(tool: &str, args: &Value) -> (String, String) {
++    let str_arg = |keys: &[&str]| -> String {
++        for key in keys {
++            if let Some(v) = args.get(*key).and_then(Value::as_str) {
++                if !v.trim().is_empty() {
++                    return v.chars().take(180).collect();
++                }
++            }
++        }
++        String::new()
++    };
++    match tool {
++        "fs.read" => ("Read".into(), str_arg(&["path"])),
++        "fs.list" => ("Read".into(), format!("list {}", str_arg(&["path"]))),
++        "fs.search" => ("Search".into(), str_arg(&["query", "pattern"])),
++        "fs.write" => ("Write".into(), str_arg(&["path"])),
++        "fs.patch" => ("Edit".into(), str_arg(&["path"])),
++        "shell.run" => ("Bash".into(), str_arg(&["command", "cmd"])),
++        "browser_status" => ("Browser".into(), "status".into()),
++        "browser_navigate" => ("Browser".into(), format!("navigate {}", str_arg(&["url"]))),
++        "browser_observe" => ("Browser".into(), "inspect visible page controls".into()),
++        "browser_click" => ("Browser".into(), format!("click {}", str_arg(&["selector"]))),
++        "browser_fill" => ("Browser".into(), format!("fill {}", str_arg(&["selector"]))),
++        "browser_scroll" => ("Browser".into(), "scroll".into()),
++        "browser_screenshot" => ("Browser".into(), "capture screenshot".into()),
++        "browser_saved_login" => ("Browser".into(), format!("saved login {}", str_arg(&["url"]))),
++        "web_search" => ("Search".into(), str_arg(&["query"])),
++        "web_fetch" => ("Fetch".into(), str_arg(&["url"])),
++        x if x.starts_with("computer_") => (
++            "Computer".into(),
++            x.trim_start_matches("computer_").replace('_', " "),
++        ),
++        _ => ("Tool".into(), tool.to_string()),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use serde_json::json;
++
++    #[test]
++    fn tool_descriptions_are_human_readable() {
++        assert_eq!(
++            tool_description("browser_navigate", &json!({"url":"https://example.com"})),
++            ("Browser".into(), "navigate https://example.com".into())
++        );
++        assert_eq!(
++            tool_description("fs.write", &json!({"path":"notes.txt"})),
++            ("Write".into(), "notes.txt".into())
++        );
++        assert_eq!(
++            tool_description("shell.run", &json!({"command":"cargo test"})),
++            ("Bash".into(), "cargo test".into())
++        );
++    }
++}
