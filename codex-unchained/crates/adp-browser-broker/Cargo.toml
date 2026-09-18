@@ -1,0 +1,14 @@
+[package]
+name = "adp-browser-broker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+adp-browser-bridge = { path = "../adp-browser-bridge" }
+adp-memory = { path = "../adp-memory" }
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
