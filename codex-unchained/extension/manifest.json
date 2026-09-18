@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "ADP Browser Runtime (Unchained)",
+  "version": "0.1.0",
+  "description": "Local Chrome/Edge execution bridge for the provider-neutral ADP runtime.",
+  "permissions": [
+    "activeTab",
+    "alarms",
+    "downloads",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "http://127.0.0.1:8765/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "ADP Browser Runtime"
+  }
+}
