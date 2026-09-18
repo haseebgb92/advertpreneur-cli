@@ -185,8 +185,8 @@ impl<'a> WorkflowExecutor<'a> {
                         format!("post-action inspection failed: {error}"),
                         None,
                         step.expected_after
-                        .as_ref()
-                        .map(|value| value.digest.clone()),
+                            .as_ref()
+                            .map(|value| value.digest.clone()),
                     );
                 }
             };
@@ -215,8 +215,8 @@ impl<'a> WorkflowExecutor<'a> {
                     reason,
                     Some(after_fingerprint.digest),
                     step.expected_after
-                            .as_ref()
-                            .map(|value| value.digest.clone()),
+                        .as_ref()
+                        .map(|value| value.digest.clone()),
                 );
             }
 
