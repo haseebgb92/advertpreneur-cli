@@ -78,7 +78,7 @@ impl<'a> WorkflowExecutor<'a> {
                 }
             };
 
-            let before_fingerprint = fingerprint(&before);
+            let before_fingerprint = fingerprint_snapshot(&before);
             let Some(expected_before) = step.expected_before.as_ref() else {
                 return self.finish_repair(
                     workflow,
@@ -191,7 +191,7 @@ impl<'a> WorkflowExecutor<'a> {
                 }
             };
 
-            let after_fingerprint = fingerprint(&after);
+            let after_fingerprint = fingerprint_snapshot(&after);
             if let Some(expected_after) = step.expected_after.as_ref()
                 && after_fingerprint.digest != expected_after.digest
             {
@@ -364,7 +364,7 @@ fn resolve_fill_value(step: &WorkflowStep, context: &ExecutionContext) -> Result
     Err("fill value must be a workflow variable binding".to_string())
 }
 
-fn fingerprint(snapshot: &BrowserSnapshot) -> PageFingerprint {
+pub fn fingerprint_snapshot(snapshot: &BrowserSnapshot) -> PageFingerprint {
     let landmarks = snapshot
         .elements
         .iter()
@@ -486,8 +486,8 @@ mod tests {
 
     #[test]
     fn fingerprint_ignores_url_query_values() {
-        let a = fingerprint(&snapshot("https://example.com/search?q=one"));
-        let b = fingerprint(&snapshot("https://example.com/search?q=two"));
+        let a = fingerprint_snapshot(&snapshot("https://example.com/search?q=one"));
+        let b = fingerprint_snapshot(&snapshot("https://example.com/search?q=two"));
         assert_eq!(a.digest, b.digest);
     }
 
@@ -549,7 +549,7 @@ mod tests {
                 "name": "Export"
             }),
         };
-        let fp = fingerprint(&page);
+        let fp = fingerprint_snapshot(&page);
         assert!(verify_step(&page, &fp, &[verification]).is_ok());
     }
 }
