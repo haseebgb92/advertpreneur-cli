@@ -67,6 +67,24 @@ adp-unchained chat --web --provider local --model qwen3:1.7b "Research the lates
 
 This means a small local model can request web search even though the model itself has no built-in web implementation. Without a web API credential, browser tools remain available for browser-driven research.
 
+## Use the real patched Codex CLI
+
+The Windows patched-Codex package contains `codex-unchained.exe` and `adp-mcp.exe` side-by-side. Install it with:
+
+```powershell
+.\INSTALL-CODEX-WINDOWS.ps1 -AddToPath
+```
+
+The installer writes `CODEX-MCP-CONFIG.toml` with the exact installed `adp-mcp.exe` path. Copy that block into your Codex `config.toml`.
+
+Then load the packaged `extension/` folder as an unpacked Chrome/Edge extension and run, for example:
+
+```powershell
+codex-unchained --oss -m qwen3:1.7b
+```
+
+Inside that Codex session, ADP Browser/Web are MCP host tools. The Ollama model chooses when to request them; `adp-mcp.exe` performs the work. This is the bridge that removes Browser/Web availability from the model-provider boundary.
+
 ## Teach and replay
 
 Teach a workflow by demonstrating it in the bound browser:
