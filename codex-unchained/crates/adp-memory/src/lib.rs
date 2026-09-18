@@ -1,4 +1,3 @@
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -172,9 +171,16 @@ impl ProjectMemory {
         Ok(serde_json::from_slice(&bytes)?)
     }
 
-    pub fn save_run_stats(&self, workflow_name: &str, stats: &RunStats) -> Result<PathBuf, MemoryError> {
+    pub fn save_run_stats(
+        &self,
+        workflow_name: &str,
+        stats: &RunStats,
+    ) -> Result<PathBuf, MemoryError> {
         let slug = workflow_slug(workflow_name)?;
-        let path = self.root.join("workflows").join(format!("{slug}.stats.json"));
+        let path = self
+            .root
+            .join("workflows")
+            .join(format!("{slug}.stats.json"));
         atomic_json_write(&path, stats)?;
         Ok(path)
     }
@@ -192,8 +198,8 @@ pub fn safe_url(input: &str) -> Option<String> {
 pub fn sanitize_fill(selector_hint: &str, value: &str) -> Option<String> {
     let hint = selector_hint.to_ascii_lowercase();
     const SENSITIVE: &[&str] = &[
-        "password", "passwd", "secret", "token", "otp", "mfa", "pin", "cvv",
-        "card", "auth", "passcode",
+        "password", "passwd", "secret", "token", "otp", "mfa", "pin", "cvv", "card", "auth",
+        "passcode",
     ];
     if SENSITIVE.iter().any(|needle| hint.contains(needle)) {
         return None;
@@ -207,7 +213,13 @@ pub fn sanitize_fill(selector_hint: &str, value: &str) -> Option<String> {
 }
 
 fn normalize_text(value: &str, max: usize) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(max).collect()
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(max)
+        .collect()
 }
 
 fn workflow_slug(name: &str) -> Result<String, MemoryError> {
