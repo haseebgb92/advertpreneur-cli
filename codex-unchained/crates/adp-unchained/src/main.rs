@@ -181,8 +181,11 @@ async fn chat(args: ChatArgs) -> Result<(), Box<dyn Error>> {
         println!("{}", result.final_text);
     }
     eprintln!(
-        "model_turns={} tool_calls={}",
-        result.model_turns, result.tool_calls
+        "model_turns={} tool_calls={} input_tokens={} output_tokens={}",
+        result.model_turns,
+        result.tool_calls,
+        result.input_tokens,
+        result.output_tokens
     );
     Ok(())
 }
