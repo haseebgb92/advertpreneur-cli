@@ -7,10 +7,14 @@ $ErrorActionPreference = "Stop"
 
 $PackageRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ExeSource = Join-Path $PackageRoot "adp-unchained.exe"
+$McpSource = Join-Path $PackageRoot "adp-mcp.exe"
 $ExtensionSource = Join-Path $PackageRoot "extension"
 
 if (-not (Test-Path $ExeSource)) {
     throw "adp-unchained.exe was not found beside INSTALL-WINDOWS.ps1"
+}
+if (-not (Test-Path $McpSource)) {
+    throw "adp-mcp.exe was not found beside INSTALL-WINDOWS.ps1"
 }
 if (-not (Test-Path $ExtensionSource)) {
     throw "extension folder was not found beside INSTALL-WINDOWS.ps1"
@@ -18,7 +22,16 @@ if (-not (Test-Path $ExtensionSource)) {
 
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
 Copy-Item -Force $ExeSource (Join-Path $InstallRoot "adp-unchained.exe")
+Copy-Item -Force $McpSource (Join-Path $InstallRoot "adp-mcp.exe")
 Copy-Item -Recurse -Force $ExtensionSource (Join-Path $InstallRoot "extension")
+
+$mcpPath = (Join-Path $InstallRoot "adp-mcp.exe").Replace("\", "\\")
+$codexSnippet = @"
+[mcp_servers.adp]
+command = "$mcpPath"
+startup_timeout_sec = 20
+"@
+Set-Content -Path (Join-Path $InstallRoot "CODEX-MCP-CONFIG.toml") -Value $codexSnippet -Encoding UTF8
 
 if ($AddToPath) {
     $current = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -38,5 +51,10 @@ Write-Host "Chrome/Edge extension folder:"
 Write-Host "  $(Join-Path $InstallRoot "extension")"
 Write-Host ""
 Write-Host "Load it with Extensions -> Developer mode -> Load unpacked."
+Write-Host ""
+Write-Host "Codex MCP config snippet:"
+Write-Host "  $(Join-Path $InstallRoot "CODEX-MCP-CONFIG.toml")"
+Write-Host "Copy that block into your Codex config.toml to expose ADP Browser/Web tools."
+Write-Host ""
 Write-Host "Then test:"
 Write-Host "  & '$(Join-Path $InstallRoot "adp-unchained.exe")' doctor --provider local --model qwen3:1.7b"
