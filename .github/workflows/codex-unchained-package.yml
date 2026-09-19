@@ -130,17 +130,17 @@ jobs:
           $dist = Join-Path $env:GITHUB_WORKSPACE "codex-unchained\dist\patched-codex-windows-x64"
           $profile = Join-Path $env:RUNNER_TEMP "unchained-profile"
           $install = Join-Path $env:RUNNER_TEMP "unchained-install"
-          $home = Join-Path $profile ".codex-unchained"
+          $unchainedHome = Join-Path $profile ".codex-unchained"
           New-Item -ItemType Directory -Force -Path $profile | Out-Null
           $oldUserProfile = $env:USERPROFILE
           try {
             $env:USERPROFILE = $profile
-            & (Join-Path $dist "INSTALL-CODEX-WINDOWS.ps1") -InstallRoot $install -UnchainedHome $home
+            & (Join-Path $dist "INSTALL-CODEX-WINDOWS.ps1") -InstallRoot $install -UnchainedHome $unchainedHome
           }
           finally {
             $env:USERPROFILE = $oldUserProfile
           }
-          $config = Join-Path $home "config.toml"
+          $config = Join-Path $unchainedHome "config.toml"
           if (-not (Test-Path $config)) { throw "Unchained config was not created" }
           $text = Get-Content $config -Raw
           if ($text -notmatch 'model_provider\s*=\s*"unchained"') { throw "Unchained provider missing" }
