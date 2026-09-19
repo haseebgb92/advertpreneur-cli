@@ -135,6 +135,18 @@ jobs:
           $install = Join-Path $env:RUNNER_TEMP "unchained-install"
           $unchainedHome = Join-Path $profile ".codex-unchained"
           New-Item -ItemType Directory -Force -Path $profile | Out-Null
+          New-Item -ItemType Directory -Force -Path $unchainedHome | Out-Null
+          @"
+model = "ollama-local/qwen3:1.7b"
+model_provider = "unchained"
+oss_provider = "ollama"
+
+[model_providers.unchained]
+name = "ADP Unchained Model Router"
+base_url = "http://127.0.0.1:8766/v1"
+wire_api = "responses"
+requires_openai_auth = false
+"@ | Set-Content -Path (Join-Path $unchainedHome "config.toml") -Encoding UTF8
           $oldUserProfile = $env:USERPROFILE
           try {
             $env:USERPROFILE = $profile
