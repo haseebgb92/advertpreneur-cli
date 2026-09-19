@@ -452,9 +452,11 @@ mod tests {
         assert_eq!(value["visibility"], "list");
         assert_eq!(value["supports_search_tool"], true);
         assert_eq!(value["node_repl_disabled"], false);
-        assert!(value["base_instructions"]
-            .as_str()
-            .is_some_and(|instructions| instructions.contains("Codex Unchained")));
+        assert!(
+            value["base_instructions"]
+                .as_str()
+                .is_some_and(|instructions| instructions.contains("Codex Unchained"))
+        );
     }
 
     #[test]
