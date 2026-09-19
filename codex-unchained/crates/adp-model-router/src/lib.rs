@@ -150,6 +150,7 @@ fn model_info(slug: String, display_name: String, description: &str, priority: i
         "available_access_programs": null,
         "availability_nux": null,
         "upgrade": null,
+        "base_instructions": "You are Codex Unchained. Use the host-provided tools and follow the user's instructions. The selected model is the reasoning backend; Browser, shell, MCP, Web, approvals, and other execution capabilities belong to Codex Unchained.",
         "model_messages": null,
         "include_skills_usage_instructions": true,
         "include_plugin_usage_instructions": true,
@@ -451,6 +452,9 @@ mod tests {
         assert_eq!(value["visibility"], "list");
         assert_eq!(value["supports_search_tool"], true);
         assert_eq!(value["node_repl_disabled"], false);
+        assert!(value["base_instructions"]
+            .as_str()
+            .is_some_and(|instructions| instructions.contains("Codex Unchained")));
     }
 
     #[test]
