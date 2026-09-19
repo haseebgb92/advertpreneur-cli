@@ -75,7 +75,65 @@ startup_timeout_sec = 20
     if ($currentConfig -notmatch '(?m)^oss_provider\s*=') {
         Add-Content -Path $configPath -Value 'oss_provider = "ollama"'
     }
-    if ($currentConfig -notmatch '(?m)^\[model_providers\.unchained\]\s*$') {
+    if ($currentConfig -notmatch '(?m)^\[model_providers\.unchained\]\s*
+    if ($currentConfig -notmatch '(?m)^\[mcp_servers\.adp\]\s*$') {
+@"
+
+[mcp_servers.adp]
+command = "$mcpPath"
+startup_timeout_sec = 20
+"@ | Add-Content -Path $configPath -Encoding UTF8
+    }
+}
+
+$snippet = @"
+[mcp_servers.adp]
+command = "$mcpPath"
+startup_timeout_sec = 20
+"@
+$snippetPath = Join-Path $InstallRoot "CODEX-UNCHAINED-MCP-CONFIG.toml"
+Set-Content -Path $snippetPath -Value $snippet -Encoding UTF8
+
+if ($AddToPath) {
+    $current = [Environment]::GetEnvironmentVariable("Path", "User")
+    $parts = @($current -split ";" | Where-Object { $_ })
+    if ($parts -notcontains $InstallRoot) {
+        [Environment]::SetEnvironmentVariable("Path", (($parts + $InstallRoot) -join ";"), "User")
+        Write-Host "Added $InstallRoot to your user PATH."
+    }
+}
+
+Write-Host ""
+Write-Host "Codex Unchained installed as:"
+Write-Host "  $(Join-Path $InstallRoot "codex-unchained.exe")"
+Write-Host ""
+Write-Host "Dedicated Unchained home:"
+Write-Host "  $UnchainedHome"
+Write-Host ""
+Write-Host "Unchained config:"
+Write-Host "  $configPath"
+Write-Host ""
+Write-Host "Normal Codex remains separate at:"
+Write-Host "  $(Join-Path $env:USERPROFILE ".codex")"
+Write-Host ""
+Write-Host "ADP MCP bridge:"
+Write-Host "  $(Join-Path $InstallRoot "adp-mcp.exe")"
+Write-Host ""
+Write-Host "Windows sandbox helpers:"
+Write-Host "  $(Join-Path $InstallRoot "codex-windows-sandbox-setup.exe")"
+Write-Host "  $(Join-Path $InstallRoot "codex-command-runner.exe")"
+Write-Host ""
+Write-Host "Antigravity brain-only adapter:"
+Write-Host "  $InstalledAntigravityAgent"
+Write-Host ""
+Write-Host "Load this unpacked extension in Chrome/Edge:"
+Write-Host "  $InstalledExtension"
+Write-Host ""
+Write-Host "Then run:"
+Write-Host "  codex-unchained"
+Write-Host ""
+Write-Host "Inside the TUI use /model to switch models."
+) {
 @"
 
 [model_providers.unchained]
@@ -85,6 +143,12 @@ model_catalog_url = "http://127.0.0.1:8766/v1/models"
 wire_api = "responses"
 requires_openai_auth = false
 "@ | Add-Content -Path $configPath -Encoding UTF8
+    }
+    elseif ($currentConfig -notmatch '(?m)^model_catalog_url\s*=') {
+        $baseUrlLine = 'base_url = "http://127.0.0.1:8766/v1"'
+        $catalogLines = $baseUrlLine + "`r`n" + 'model_catalog_url = "http://127.0.0.1:8766/v1/models"'
+        $currentConfig = $currentConfig.Replace($baseUrlLine, $catalogLines)
+        Set-Content -Path $configPath -Value $currentConfig -Encoding UTF8
     }
     if ($currentConfig -notmatch '(?m)^\[mcp_servers\.adp\]\s*$') {
 @"
