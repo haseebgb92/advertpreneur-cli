@@ -93,6 +93,7 @@ jobs:
         run: |
           Push-Location (Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs")
           cargo build -p codex-cli --release
+          cargo build -p codex-windows-sandbox --bin codex-windows-sandbox-setup --bin codex-command-runner --release
           Pop-Location
           Push-Location (Join-Path $env:GITHUB_WORKSPACE "codex-unchained")
           cargo build -p adp-mcp --release
@@ -113,6 +114,8 @@ jobs:
           $dist = Join-Path $env:GITHUB_WORKSPACE "codex-unchained\dist\patched-codex-windows-x64"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Copy-Item (Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs\target\release\codex.exe") (Join-Path $dist "codex-unchained.exe")
+          Copy-Item (Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs\target\release\codex-windows-sandbox-setup.exe") $dist
+          Copy-Item (Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs\target\release\codex-command-runner.exe") $dist
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "codex-unchained\target\release\adp-mcp.exe") $dist
           Copy-Item -Recurse (Join-Path $env:GITHUB_WORKSPACE "codex-unchained\extension") (Join-Path $dist "extension")
           Copy-Item -Recurse (Join-Path $env:GITHUB_WORKSPACE "codex-unchained\antigravity-agent") (Join-Path $dist "antigravity-agent")
@@ -145,7 +148,10 @@ jobs:
           $text = Get-Content $config -Raw
           if ($text -notmatch 'model_provider\s*=\s*"unchained"') { throw "Unchained provider missing" }
           if ($text -notmatch '\[model_providers\.unchained\]') { throw "Unchained provider block missing" }
+          if ($text -notmatch 'model_catalog_url\s*=\s*"http://127\.0\.0\.1:8766/v1/models"') { throw "Unchained model catalog URL missing" }
           if ($text -notmatch '\[mcp_servers\.adp\]') { throw "ADP MCP block missing" }
+          if (-not (Test-Path (Join-Path $install "codex-windows-sandbox-setup.exe"))) { throw "Windows sandbox setup helper missing" }
+          if (-not (Test-Path (Join-Path $install "codex-command-runner.exe"))) { throw "Windows command runner helper missing" }
           if (Test-Path (Join-Path $profile ".codex")) { throw "Installer touched normal Codex home" }
           if (-not (Test-Path (Join-Path $profile ".gemini\config\agents\adp-unchained-brain\agent.md"))) {
             throw "Antigravity brain-only agent was not installed"
