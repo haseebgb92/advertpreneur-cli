@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use adp_model::{AntigravityClient, AntigravityResponse};
 use axum::Router;
 use axum::body::Body;
