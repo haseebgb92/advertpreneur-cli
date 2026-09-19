@@ -9,10 +9,12 @@ $PackageRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $CodexSource = Join-Path $PackageRoot "codex-unchained.exe"
 $McpSource = Join-Path $PackageRoot "adp-mcp.exe"
+$SandboxSetupSource = Join-Path $PackageRoot "codex-windows-sandbox-setup.exe"
+$CommandRunnerSource = Join-Path $PackageRoot "codex-command-runner.exe"
 $ExtensionSource = Join-Path $PackageRoot "extension"
 $AntigravityAgentSource = Join-Path $PackageRoot "antigravity-agent\adp-unchained-brain"
 
-foreach ($required in @($CodexSource, $McpSource, $ExtensionSource, $AntigravityAgentSource)) {
+foreach ($required in @($CodexSource, $McpSource, $SandboxSetupSource, $CommandRunnerSource, $ExtensionSource, $AntigravityAgentSource)) {
     if (-not (Test-Path $required)) {
         throw "Missing package component: $required"
     }
@@ -23,6 +25,8 @@ New-Item -ItemType Directory -Force -Path $UnchainedHome | Out-Null
 
 Copy-Item -Force $CodexSource (Join-Path $InstallRoot "codex-unchained.exe")
 Copy-Item -Force $McpSource (Join-Path $InstallRoot "adp-mcp.exe")
+Copy-Item -Force $SandboxSetupSource (Join-Path $InstallRoot "codex-windows-sandbox-setup.exe")
+Copy-Item -Force $CommandRunnerSource (Join-Path $InstallRoot "codex-command-runner.exe")
 
 $InstalledExtension = Join-Path $InstallRoot "extension"
 if (Test-Path $InstalledExtension) {
@@ -51,6 +55,7 @@ oss_provider = "ollama"
 [model_providers.unchained]
 name = "ADP Unchained Model Router"
 base_url = "http://127.0.0.1:8766/v1"
+model_catalog_url = "http://127.0.0.1:8766/v1/models"
 wire_api = "responses"
 requires_openai_auth = false
 
@@ -76,6 +81,7 @@ startup_timeout_sec = 20
 [model_providers.unchained]
 name = "ADP Unchained Model Router"
 base_url = "http://127.0.0.1:8766/v1"
+model_catalog_url = "http://127.0.0.1:8766/v1/models"
 wire_api = "responses"
 requires_openai_auth = false
 "@ | Add-Content -Path $configPath -Encoding UTF8
@@ -122,6 +128,10 @@ Write-Host "  $(Join-Path $env:USERPROFILE ".codex")"
 Write-Host ""
 Write-Host "ADP MCP bridge:"
 Write-Host "  $(Join-Path $InstallRoot "adp-mcp.exe")"
+Write-Host ""
+Write-Host "Windows sandbox helpers:"
+Write-Host "  $(Join-Path $InstallRoot "codex-windows-sandbox-setup.exe")"
+Write-Host "  $(Join-Path $InstallRoot "codex-command-runner.exe")"
 Write-Host ""
 Write-Host "Antigravity brain-only adapter:"
 Write-Host "  $InstalledAntigravityAgent"
