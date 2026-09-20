@@ -73,6 +73,19 @@ jobs:
           python3 codex-unchained/upstream-patches/apply_0003.py "$CODEX_UPSTREAM_ROOT"
           git -C "$CODEX_UPSTREAM_ROOT" diff --check
 
+      - name: Raise codex-chatgpt recursion limit
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          root = Path(r"${{ runner.temp }}") / "codex-upstream" / "codex-rs" / "chatgpt" / "src"
+          lib = root / "lib.rs"
+          text = lib.read_text(encoding="utf-8")
+          attr = '#![recursion_limit = "256"]'
+          if attr not in text:
+              lib.write_text(attr + "\n" + text, encoding="utf-8")
+          PY
+
       - name: Build patched Codex
         shell: bash
         env:
