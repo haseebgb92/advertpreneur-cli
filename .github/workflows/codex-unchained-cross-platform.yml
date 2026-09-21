@@ -2,7 +2,7 @@ name: Codex Unchained Cross-Platform Package
 
 concurrency:
   group: codex-unchained-cross-platform-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 on:
   workflow_dispatch:
@@ -88,8 +88,6 @@ jobs:
 
       - name: Build patched Codex
         shell: bash
-        env:
-          RUSTFLAGS: "-C codegen-units=1"
         run: cargo build --manifest-path "$CODEX_UPSTREAM_ROOT/codex-rs/Cargo.toml" -p codex-cli --release --target ${{ matrix.target }}
 
       - name: Build ADP MCP bridge
