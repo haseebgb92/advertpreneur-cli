@@ -50,6 +50,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Validate POSIX bootstrap syntax
+        if: runner.os != 'Windows'
+        shell: bash
+        run: sh -n codex-unchained/install.sh
+
+      - name: Validate Windows bootstrap syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $source = Get-Content "codex-unchained/install.ps1" -Raw
+          $null = [scriptblock]::Create($source)
         with:
           targets: ${{ matrix.target }}
 
