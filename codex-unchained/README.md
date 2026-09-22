@@ -133,52 +133,69 @@ Antigravity is an explicit provider in v0.2: select one of its discovered models
 
 ## Install
 
-### Linux and macOS
+Normal users should install a prebuilt package. Building upstream Codex locally is only for development.
 
-The bootstrap installer selects the matching release artifact, installs all three binaries, creates the isolated Unchained configuration, installs the browser extension files and AGY brain adapter, and defaults to `adp/auto`.
-
-```bash
-sh install.sh
-```
-
-The default binary location is:
-
-```text
-~/.local/bin/codex-unchained
-~/.local/bin/adp-mcp
-~/.local/bin/adp-unchained
-```
-
-The installer creates/updates:
-
-```text
-~/.codex-unchained/config.toml
-~/.codex-unchained/extension/
-~/.gemini/config/agents/adp-unchained-brain/
-```
-
-Then authenticate the providers you want and run:
+### Linux
 
 ```bash
-adp-unchained auth ollama
-codex-unchained
+curl -fsSL https://raw.githubusercontent.com/haseebgb92/advertpreneur-cli/codex-unchained-v0.2/codex-unchained/install.sh | sh
+```
+
+Supported release targets:
+
+```text
+Linux x64
+Linux ARM64
+```
+
+### macOS
+
+The same installer detects Intel versus Apple Silicon automatically:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/haseebgb92/advertpreneur-cli/codex-unchained-v0.2/codex-unchained/install.sh | sh
+```
+
+Supported release targets:
+
+```text
+macOS Intel (x64)
+macOS Apple Silicon (ARM64)
 ```
 
 ### Windows
 
-The release bootstrap installs the patched Codex binary, ADP MCP/model router, auth helper, browser extension and required Windows sandbox helpers. It creates an isolated `~/.codex-unchained` configuration with `adp/auto` as the default.
-
-For the unpacked Windows package:
+Run in PowerShell:
 
 ```powershell
-.\INSTALL-CODEX-WINDOWS.ps1 -AddToPath
+irm https://raw.githubusercontent.com/haseebgb92/advertpreneur-cli/codex-unchained-v0.2/codex-unchained/install.ps1 | iex
 ```
 
-Then:
+Supported release target:
 
-```powershell
+```text
+Windows x64
+```
+
+The installers resolve only GitHub releases tagged `codex-unchained-v*`, download the correct platform bundle, install the binaries, browser extension files and AGY brain adapter, create/update the isolated `~/.codex-unchained` configuration, and default to `adp/auto`.
+
+After installation:
+
+```bash
 adp-unchained auth ollama
 codex-unchained
+```
+
+Optional providers:
+
+```bash
+adp-unchained auth agy
+```
+
+For an Ollama API key, set `OLLAMA_API_KEY` and run:
+
+```bash
+adp-unchained auth ollama --method api
 ```
 
 ## Build locally

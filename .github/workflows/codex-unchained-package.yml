@@ -121,6 +121,7 @@ jobs:
           Copy-Item (Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs\target\release\codex-windows-sandbox-service.exe") $dist
           Copy-Item (Join-Path $env:CODEX_UPSTREAM_ROOT "codex-rs\target\release\codex-command-runner.exe") $dist
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE "codex-unchained\target\release\adp-mcp.exe") $dist
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE "codex-unchained\target\release\adp-unchained.exe") $dist
           Copy-Item -Recurse (Join-Path $env:GITHUB_WORKSPACE "codex-unchained\extension") (Join-Path $dist "extension")
           Copy-Item -Recurse (Join-Path $env:GITHUB_WORKSPACE "codex-unchained\antigravity-agent") (Join-Path $dist "antigravity-agent")
           Copy-Item "codex-unchained\INSTALL-CODEX-WINDOWS.ps1" $dist

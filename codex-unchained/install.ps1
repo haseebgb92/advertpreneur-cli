@@ -5,7 +5,18 @@ $version = if ($env:CODEX_UNCHAINED_VERSION) { $env:CODEX_UNCHAINED_VERSION } el
 $installDir = if ($env:CODEX_UNCHAINED_INSTALL_DIR) { $env:CODEX_UNCHAINED_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "Advertpreneur\Unchained" }
 $unchainedHome = if ($env:CODEX_UNCHAINED_HOME) { $env:CODEX_UNCHAINED_HOME } else { Join-Path $env:USERPROFILE ".codex-unchained" }
 $asset = "patched-codex-windows-x64"
-$base = if ($version -eq "latest") { "https://github.com/$repo/releases/latest/download" } else { "https://github.com/$repo/releases/download/$version" }
+
+if ($version -eq "latest") {
+    $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases?per_page=50" -Headers @{ Accept = "application/vnd.github+json" }
+    $release = $releases | Where-Object { -not $_.draft -and $_.tag_name -like "codex-unchained-v*" } | Select-Object -First 1
+    if (-not $release) {
+        throw "No Codex Unchained release was found. Expected a release tag matching codex-unchained-v*."
+    }
+    $version = $release.tag_name
+}
+
+$base = "https://github.com/$repo/releases/download/$version"
+Write-Host "Installing Codex Unchained $version ($asset)"
 
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("codex-unchained-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Force $tmp | Out-Null
@@ -28,9 +39,10 @@ try {
         "codex-command-runner.exe"
     )) {
         $src = Join-Path $pkg $name
-        if (Test-Path $src) {
-            Copy-Item $src (Join-Path $installDir $name) -Force
+        if (-not (Test-Path $src)) {
+            throw "Release package is incomplete. Missing: $name"
         }
+        Copy-Item $src (Join-Path $installDir $name) -Force
     }
 
     $extension = Join-Path $pkg "extension"

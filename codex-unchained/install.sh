@@ -20,10 +20,15 @@ case "$os/$arch" in
 esac
 
 if [ "$version" = latest ]; then
-  base="https://github.com/$repo/releases/latest/download"
-else
-  base="https://github.com/$repo/releases/download/$version"
+  releases_json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$repo/releases?per_page=50")"
+  version="$(printf '%s' "$releases_json" | tr ',' '\n' | sed -n 's/.*"tag_name":[[:space:]]*"\(codex-unchained-v[^"]*\)".*/\1/p' | head -n 1)"
+  if [ -z "$version" ]; then
+    echo "No Codex Unchained release was found. Expected a release tag matching codex-unchained-v*." >&2
+    exit 1
+  fi
 fi
+base="https://github.com/$repo/releases/download/$version"
+echo "Installing Codex Unchained $version ($asset)"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

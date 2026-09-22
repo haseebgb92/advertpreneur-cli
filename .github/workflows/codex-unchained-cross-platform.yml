@@ -2,16 +2,27 @@ name: Codex Unchained Cross-Platform Package
 
 concurrency:
   group: codex-unchained-cross-platform-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
+
+permissions:
+  contents: write
 
 on:
   workflow_dispatch:
   push:
     branches:
       - "codex-unchained-*"
+    tags:
+      - "codex-unchained-v*"
     paths:
       - "codex-unchained/**"
       - ".github/workflows/codex-unchained-cross-platform.yml"
+
+env:
+  CARGO_BUILD_JOBS: "1"
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_DEBUG: "0"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "8"
 
 jobs:
   package:
@@ -49,6 +60,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -131,6 +143,9 @@ jobs:
             cp "$CODEX_UPSTREAM_ROOT/codex-rs/target/${{ matrix.target }}/release/codex-windows-sandbox-service.exe" "$dist/"
             cp "$CODEX_UPSTREAM_ROOT/codex-rs/target/${{ matrix.target }}/release/codex-command-runner.exe" "$dist/"
           fi
+          test -f "$dist/codex-unchained${{ matrix.ext }}"
+          test -f "$dist/adp-mcp${{ matrix.ext }}"
+          test -f "$dist/adp-unchained${{ matrix.ext }}"
           tar -czf "codex-unchained/dist/${{ matrix.artifact }}.tar.gz" -C codex-unchained/dist "${{ matrix.artifact }}"
 
       - name: Smoke binary
@@ -145,3 +160,44 @@ jobs:
           name: ${{ matrix.artifact }}
           path: codex-unchained/dist/${{ matrix.artifact }}.tar.gz
           if-no-files-found: error
+
+  publish:
+    name: Publish installable release
+    needs: package
+    if: github.ref == 'refs/heads/codex-unchained-v0.2' || startsWith(github.ref, 'refs/tags/codex-unchained-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: patched-codex-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify release matrix
+        shell: bash
+        run: |
+          test -f release-assets/patched-codex-linux-x64.tar.gz
+          test -f release-assets/patched-codex-linux-arm64.tar.gz
+          test -f release-assets/patched-codex-macos-x64.tar.gz
+          test -f release-assets/patched-codex-macos-arm64.tar.gz
+          test -f release-assets/patched-codex-windows-x64.tar.gz
+          sha256sum release-assets/*.tar.gz > release-assets/SHA256SUMS
+
+      - name: Publish branch prerelease
+        if: github.ref == 'refs/heads/codex-unchained-v0.2'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="codex-unchained-v0.2.0-alpha.${GITHUB_RUN_NUMBER}"
+          gh release create "$tag"             release-assets/*.tar.gz             release-assets/SHA256SUMS             codex-unchained/install.sh             codex-unchained/install.ps1             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "Codex Unchained v0.2 alpha ${GITHUB_RUN_NUMBER}"             --notes "Prebuilt Codex Unchained packages for Linux x64/ARM64, macOS Intel/Apple Silicon, and Windows x64. Normal users do not need Rust or a source build."             --prerelease
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/codex-unchained-v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME"             release-assets/*.tar.gz             release-assets/SHA256SUMS             codex-unchained/install.sh             codex-unchained/install.ps1             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "Codex Unchained ${GITHUB_REF_NAME#codex-unchained-v}"             --generate-notes
