@@ -111,9 +111,7 @@ def main() -> None:
                     "balanced" => "adp/balanced",
                     "max" => "adp/max",
                     _ => {
-                        self.add_error_message(
-                            "Usage: /adp auto|economy|balanced|max".to_string(),
-                        );
+                        self.add_error_message("Usage: /adp auto|economy|balanced|max".to_string());
                         return;
                     }
                 };
