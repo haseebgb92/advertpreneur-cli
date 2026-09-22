@@ -91,9 +91,9 @@ jobs:
         shell: bash
         run: cargo build --manifest-path "$CODEX_UPSTREAM_ROOT/codex-rs/Cargo.toml" -p codex-cli --release --target ${{ matrix.target }}
 
-      - name: Build ADP MCP bridge
+      - name: Build ADP helper CLI and MCP bridge
         shell: bash
-        run: cargo build --manifest-path codex-unchained/Cargo.toml -p adp-mcp --release --target ${{ matrix.target }}
+        run: cargo build --manifest-path codex-unchained/Cargo.toml -p adp-unchained -p adp-mcp --release --target ${{ matrix.target }}
 
       - name: Build Windows sandbox helpers
         if: runner.os == 'Windows'
@@ -109,6 +109,7 @@ jobs:
           mkdir -p "$dist"
           cp "$CODEX_UPSTREAM_ROOT/codex-rs/target/${{ matrix.target }}/release/codex${{ matrix.ext }}" "$dist/codex-unchained${{ matrix.ext }}"
           cp "codex-unchained/target/${{ matrix.target }}/release/adp-mcp${{ matrix.ext }}" "$dist/adp-mcp${{ matrix.ext }}"
+          cp "codex-unchained/target/${{ matrix.target }}/release/adp-unchained${{ matrix.ext }}" "$dist/adp-unchained${{ matrix.ext }}"
           cp -R codex-unchained/extension "$dist/extension"
           cp -R codex-unchained/antigravity-agent "$dist/antigravity-agent"
           cp codex-unchained/README.md "$dist/"
@@ -125,6 +126,7 @@ jobs:
         run: |
           "codex-unchained/dist/${{ matrix.artifact }}/codex-unchained${{ matrix.ext }}" --version
           "codex-unchained/dist/${{ matrix.artifact }}/codex-unchained${{ matrix.ext }}" --help
+          "codex-unchained/dist/${{ matrix.artifact }}/adp-unchained${{ matrix.ext }}" auth --help
 
       - uses: actions/upload-artifact@v4
         with:
