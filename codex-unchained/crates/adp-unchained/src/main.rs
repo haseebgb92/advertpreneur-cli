@@ -2,7 +2,7 @@ use adp_agent::{AgentRuntime, BROWSER_CLICK, BROWSER_FILL, BROWSER_INSPECT, Tool
 use adp_browser_broker::{BrokerState, serve};
 use adp_executor::{ReplayOutcome, WorkflowExecutor, verify_repair_candidate};
 use adp_memory::{ProjectMemory, SemanticTarget, TEACH_KEYWORD, WorkflowRepair, WorkflowStep};
-use adp_model::{OllamaClient, OllamaConfig, OllamaTransport};
+use adp_model::{AntigravityClient, OllamaClient, OllamaConfig, OllamaTransport};
 use adp_protocol::ExecutionContext;
 use adp_teach::{TeachConfig, TeachRecordOutcome, TeachRecorder};
 use adp_web::{WebClient, WebConfig};
@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::PathBuf;
+use std::process::{Command as ProcessCommand, Stdio};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::time::{Instant, sleep};
@@ -31,6 +32,8 @@ enum Command {
     Models(ModelArgs),
     /// Check provider capabilities and connectivity.
     Doctor(ModelArgs),
+    /// Sign in to or validate an external model provider.
+    Auth(AuthArgs),
     /// Run a model conversation with optional browser and web host tools.
     Chat(ChatArgs),
     /// Search the public web through the Ollama host web API.
@@ -47,6 +50,28 @@ enum Command {
 enum ProviderArg {
     Local,
     Cloud,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum AuthProviderArg {
+    Ollama,
+    Agy,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum AuthMethodArg {
+    Login,
+    Api,
+}
+
+#[derive(Debug, Args)]
+struct AuthArgs {
+    #[arg(value_enum)]
+    provider: AuthProviderArg,
+    #[arg(long, value_enum, default_value_t = AuthMethodArg::Login)]
+    method: AuthMethodArg,
+    #[arg(long, default_value = "OLLAMA_API_KEY")]
+    api_key_env: String,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -146,6 +171,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Command::Broker => run_broker().await?,
         Command::Models(args) => list_models(args).await?,
         Command::Doctor(args) => doctor(args).await?,
+        Command::Auth(args) => auth_provider(args).await?,
         Command::Chat(args) => chat(args).await?,
         Command::WebSearch(args) => web_search(args).await?,
         Command::WebFetch(args) => web_fetch(args).await?,
@@ -161,6 +187,90 @@ async fn run_broker() -> Result<(), Box<dyn Error>> {
     let listener = bind_broker().await?;
     println!("ADP browser broker listening on http://127.0.0.1:8765");
     serve(listener, state).await?;
+    Ok(())
+}
+
+async fn auth_provider(args: AuthArgs) -> Result<(), Box<dyn Error>> {
+    match (args.provider, args.method) {
+        (AuthProviderArg::Ollama, AuthMethodArg::Login) => {
+            println!("Opening the official Ollama sign-in flow...");
+            let status = ProcessCommand::new("ollama")
+                .arg("signin")
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .status()?;
+            if !status.success() {
+                return Err(format!("ollama signin exited with status {status}").into());
+            }
+
+            let client = OllamaClient::new(OllamaConfig {
+                transport: OllamaTransport::Cloud,
+                model: "gpt-oss:120b-cloud".to_string(),
+                base_url: None,
+                // A browser/CLI sign-in is consumed by the local Ollama daemon,
+                // so the direct cloud API key is intentionally not required.
+                api_key_env: Some("__ADP_OLLAMA_SIGNIN_SESSION__".to_string()),
+            })?;
+            println!("Ollama sign-in completed. Cloud models will be fetched by the Unchained router through the signed-in local daemon.");
+            drop(client);
+        }
+        (AuthProviderArg::Ollama, AuthMethodArg::Api) => {
+            let key = std::env::var(&args.api_key_env)
+                .map_err(|_| format!("{} is not set", args.api_key_env))?;
+            if key.trim().is_empty() {
+                return Err(format!("{} is empty", args.api_key_env).into());
+            }
+
+            let client = OllamaClient::new(OllamaConfig {
+                transport: OllamaTransport::Cloud,
+                model: "gpt-oss:120b-cloud".to_string(),
+                base_url: None,
+                api_key_env: Some(args.api_key_env.clone()),
+            })?;
+            let models = client.list_models().await?;
+            println!(
+                "Ollama Cloud API authenticated via {}. Visible models: {}",
+                args.api_key_env,
+                models.len()
+            );
+            for model in models.iter().take(12) {
+                println!("  {model}");
+            }
+        }
+        (AuthProviderArg::Agy, AuthMethodArg::Login) => {
+            let client = AntigravityClient::new();
+            if let Ok(models) = client.list_models() {
+                println!("Antigravity CLI already has an authenticated session. Visible models: {}", models.len());
+                for model in models.iter().take(12) {
+                    println!("  {} ({})", model.label, model.slug);
+                }
+                return Ok(());
+            }
+
+            println!("Launching the official Antigravity CLI. Complete Google Sign-In there, then exit AGY to return to Unchained.");
+            let status = ProcessCommand::new("agy")
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .status()?;
+            if !status.success() {
+                return Err(format!("agy exited with status {status}").into());
+            }
+
+            let models = client.list_models()?;
+            println!("Antigravity session detected. Visible models: {}", models.len());
+            for model in models.iter().take(12) {
+                println!("  {} ({})", model.label, model.slug);
+            }
+        }
+        (AuthProviderArg::Agy, AuthMethodArg::Api) => {
+            return Err(
+                "Antigravity CLI individual-account access uses the official Google Sign-In session, not an API-key login. Use --method login for AGY."
+                    .into(),
+            );
+        }
+    }
     Ok(())
 }
 
