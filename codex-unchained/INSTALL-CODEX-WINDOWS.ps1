@@ -9,6 +9,7 @@ $PackageRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $CodexSource = Join-Path $PackageRoot "codex-unchained.exe"
 $McpSource = Join-Path $PackageRoot "adp-mcp.exe"
+$HelperSource = Join-Path $PackageRoot "adp-unchained.exe"
 $SandboxSetupSource = Join-Path $PackageRoot "codex-windows-sandbox-setup.exe"
 $SandboxServiceSource = Join-Path $PackageRoot "codex-windows-sandbox-service.exe"
 $CommandRunnerSource = Join-Path $PackageRoot "codex-command-runner.exe"
@@ -18,6 +19,7 @@ $AntigravityAgentSource = Join-Path $PackageRoot "antigravity-agent\adp-unchaine
 foreach ($required in @(
     $CodexSource,
     $McpSource,
+    $HelperSource,
     $SandboxSetupSource,
     $SandboxServiceSource,
     $CommandRunnerSource,
@@ -34,6 +36,7 @@ New-Item -ItemType Directory -Force -Path $UnchainedHome | Out-Null
 
 Copy-Item -Force $CodexSource (Join-Path $InstallRoot "codex-unchained.exe")
 Copy-Item -Force $McpSource (Join-Path $InstallRoot "adp-mcp.exe")
+Copy-Item -Force $HelperSource (Join-Path $InstallRoot "adp-unchained.exe")
 Copy-Item -Force $SandboxSetupSource (Join-Path $InstallRoot "codex-windows-sandbox-setup.exe")
 Copy-Item -Force $SandboxServiceSource (Join-Path $InstallRoot "codex-windows-sandbox-service.exe")
 Copy-Item -Force $CommandRunnerSource (Join-Path $InstallRoot "codex-command-runner.exe")
@@ -58,7 +61,7 @@ $configPath = Join-Path $UnchainedHome "config.toml"
 if (-not (Test-Path $configPath)) {
     @(
         '# Codex Unchained owns this config. Normal Codex continues to use ~/.codex/config.toml.'
-        'model = "ollama-local/qwen3:1.7b"'
+        'model = "adp/auto"'
         'model_provider = "unchained"'
         'oss_provider = "ollama"'
         ''
@@ -77,7 +80,7 @@ if (-not (Test-Path $configPath)) {
     $lines = @(Get-Content $configPath)
 
     if (-not ($lines -match '^model\s*=')) {
-        Add-Content -Path $configPath -Value 'model = "ollama-local/qwen3:1.7b"'
+        Add-Content -Path $configPath -Value 'model = "adp/auto"'
     }
     if (-not ($lines -match '^model_provider\s*=')) {
         Add-Content -Path $configPath -Value 'model_provider = "unchained"'
@@ -143,6 +146,12 @@ if (-not (Test-Path $configPath)) {
     }
 }
 
+# Migrate the original v0.1 local-model default to ADP Auto without touching
+# any other explicitly pinned model.
+$configText = Get-Content $configPath -Raw
+$configText = $configText -replace 'model\s*=\s*"ollama-local/qwen3:1\.7b"', 'model = "adp/auto"'
+Set-Content -Path $configPath -Value $configText -Encoding UTF8
+
 $snippetPath = Join-Path $InstallRoot "CODEX-UNCHAINED-MCP-CONFIG.toml"
 @(
     '[mcp_servers.adp]'
@@ -190,3 +199,12 @@ Write-Host "Then run:"
 Write-Host "  codex-unchained"
 Write-Host ""
 Write-Host "Inside the TUI use /model to switch models."
+
+Write-Host ""
+Write-Host "Provider setup:"
+Write-Host "  Ollama browser login: adp-unchained auth ollama"
+Write-Host "  Ollama API key:       set OLLAMA_API_KEY, then run adp-unchained auth ollama --method api"
+Write-Host "  Antigravity login:    adp-unchained auth agy"
+Write-Host ""
+Write-Host "Default routing mode: /adp auto"
+Write-Host "Other modes: /adp economy | /adp balanced | /adp max"
