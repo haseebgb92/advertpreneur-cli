@@ -3,7 +3,6 @@
 mod policy;
 
 use adp_model::{AntigravityClient, AntigravityResponse};
-use policy::{AdpMode, ordered_candidates};
 use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
@@ -11,6 +10,7 @@ use axum::http::{Response, StatusCode, header};
 use axum::routing::{get, post};
 use reqwest::Client;
 use serde_json::{Value, json};
+use policy::{AdpMode, ordered_candidates};
 use std::env;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -311,11 +311,7 @@ async fn route_adp_mode(
     )
 }
 
-async fn proxy_ollama_cloud(
-    http: &Client,
-    model: &str,
-    mut request: Value,
-) -> Response<Body> {
+async fn proxy_ollama_cloud(http: &Client, model: &str, mut request: Value) -> Response<Body> {
     request["model"] = Value::String(model.to_string());
 
     if let Ok(api_key) = env::var("OLLAMA_API_KEY")
