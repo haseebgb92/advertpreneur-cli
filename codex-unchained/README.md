@@ -1,129 +1,209 @@
 # ADP Codex Unchained
 
-Provider-neutral Rust execution kernel for ADP. The model provider is the reasoning engine; Browser, Web, shell, MCP, Teach, project memory, and execution capabilities belong to Codex Unchained and ADP.
+Codex Unchained keeps the Codex agent experience and host execution layer while making the reasoning backend replaceable. Browser, Web, shell, MCP, skills, approvals, project memory, Teach/replay, and execution belong to Unchained; the selected model supplies reasoning.
 
-Current branch: `codex-unchained-v0.1`.
+Current development branch: `codex-unchained-v0.2`.
 
-## What works
+Normal OpenAI Codex remains isolated in `~/.codex`. Codex Unchained owns `~/.codex-unchained`.
 
-The workspace currently contains:
-
-- provider-neutral tool/capability protocol;
-- a unified model router for Ollama Local, Ollama Cloud, and Antigravity;
-- native Codex `/model` switching through one live model catalog;
-- a dedicated Unchained home at `~/.codex-unchained`, separate from normal `~/.codex`;
-- host-owned Chrome/Edge Browser runtime over an authenticated localhost Rust broker;
-- host-owned web search and web fetch tools;
-- semantic `/teach` workflow compilation into `.advertpreneur`;
-- zero-model deterministic workflow replay when browser state matches;
-- local-model repair first, optional primary/cloud repair second;
-- verified repair persistence and resume-after-repair;
-- token/run accounting;
-- a runnable `adp-unchained` CLI;
-- reproducible compatibility patches against a pinned OpenAI Codex Rust revision.
-
-The normal CI compiles every workspace crate, runs rustfmt, clippy with warnings denied, all Rust tests, extension syntax checks, and CLI smoke commands.
-
-## Build locally
-
-From this directory:
-
-```powershell
-cargo build -p adp-unchained -p adp-mcp --release
-.\target\release\adp-unchained.exe --help
-```
-
-## Use the patched Codex Unchained CLI
-
-The Windows package contains:
-
-- `codex-unchained.exe`;
-- `adp-mcp.exe`;
-- the unpacked Chrome/Edge extension;
-- the brain-only Antigravity agent;
-- `INSTALL-CODEX-WINDOWS.ps1`.
-
-Install it with:
-
-```powershell
-.\INSTALL-CODEX-WINDOWS.ps1 -AddToPath
-```
-
-The installer creates and owns:
+## Core idea
 
 ```text
-~/.codex-unchained/
-    config.toml
-    sessions/
-    history/
-    ...
+same Codex-style agent + tools
+          |
+          +-- /adp auto
+          +-- /adp economy
+          +-- /adp balanced
+          +-- /adp max
+          |
+          +-- /model -> exact model pin
 ```
 
-Normal Codex continues to use `~/.codex`. The installer does not create or modify the normal Codex home.
+The `/adp` modes are routing policies. They choose from currently available Ollama Local and Ollama Cloud models. `/model` is the manual override and pins an exact model/provider.
 
-The generated Unchained config points Codex at the local ADP model router on `127.0.0.1:8766` and registers `adp-mcp.exe`. Load the packaged `extension/` folder as an unpacked Chrome/Edge extension, then launch:
+Automatic ADP modes intentionally do not consume an Antigravity account silently. Antigravity models remain visible for explicit selection through `/model` when the user's official `agy` session is authenticated.
 
-```powershell
-codex-unchained
-```
+## What is included
 
-No provider flags are required for normal use.
+- Rust provider-neutral protocol and execution kernel;
+- native Codex `/adp auto|economy|balanced|max` slash command;
+- native Codex `/model` exact-model picker;
+- live Ollama Local and Ollama Cloud discovery;
+- official Ollama sign-in plus direct `OLLAMA_API_KEY` support;
+- official Antigravity/`agy` session detection and model discovery;
+- dedicated `~/.codex-unchained` state, separate from normal Codex;
+- ADP-owned Chrome/Edge browser broker and extension;
+- host-owned Web search/fetch;
+- MCP bridge;
+- semantic `/teach` workflow compilation into `.advertpreneur`;
+- deterministic zero-model replay when learned state still matches;
+- local repair first and optional cloud escalation;
+- token/run accounting;
+- Linux, macOS, and Windows packaging;
+- reproducible patches against a pinned upstream OpenAI Codex Rust revision.
 
-## /model
+## Routing modes
+
+### `/adp auto`
+
+Default. Favors inexpensive capable Ollama models for routine turns and raises the model tier when the request looks materially harder.
+
+### `/adp economy`
+
+Aggressively minimizes cloud usage. Local models and low-cost cloud models receive the strongest preference.
+
+### `/adp balanced`
+
+Favors stronger cost-efficient cloud models for normal coding, research, browser work, and debugging.
+
+### `/adp max`
+
+Favors the strongest available Ollama Cloud candidates for difficult work.
 
 Inside Codex Unchained:
+
+```text
+/adp auto
+/adp economy
+/adp balanced
+/adp max
+```
+
+To bypass routing and choose an exact model:
 
 ```text
 /model
 ```
 
-uses Codex's native model picker. The ADP model router supplies a live catalog with namespaced entries:
+The live model catalog includes:
 
 ```text
+[ADP] Auto
+[ADP] Economy
+[ADP] Balanced
+[ADP] Max
 [Ollama Local] ...
 [Ollama Cloud] ...
 [Antigravity] ...
 ```
 
-The model changes; the agent and host tools do not.
+## Provider authentication
 
-### Ollama Local
+The package includes the `adp-unchained` helper CLI.
 
-Local models are discovered from the running Ollama daemon on `127.0.0.1:11434`.
+### Ollama account login
 
-The default fresh-install model is:
+Use Ollama's official sign-in flow:
 
-```text
-ollama-local/qwen3:1.7b
+```bash
+adp-unchained auth ollama
 ```
 
-### Ollama Cloud
+This runs `ollama signin`. After successful sign-in, cloud models can be prepared and used through the signed-in local Ollama daemon.
 
-Cloud models are discovered dynamically from Ollama's current cloud catalog rather than hard-coded into ADP. A selected cloud model is prepared through the signed-in local Ollama daemon and then uses the same Responses-compatible route as local Ollama.
+### Ollama API key
 
-### Antigravity
+Linux/macOS:
 
-Antigravity models are discovered dynamically through the user's existing authenticated `agy` CLI session.
-
-The installer adds a dedicated global custom agent:
-
-```text
-~/.gemini/config/agents/adp-unchained-brain/agent.md
+```bash
+export OLLAMA_API_KEY="..."
+adp-unchained auth ollama --method api
 ```
 
-That agent has no Antigravity-native tools. Antigravity acts only as the reasoning backend and returns a schema-constrained decision: either a final message or one Codex host-tool request. Codex Unchained remains responsible for Browser, shell, MCP, approvals, and tool execution.
+PowerShell:
 
-## Browser
-
-The packaged extension talks to the ADP browser broker on:
-
-```text
-127.0.0.1:8765
+```powershell
+$env:OLLAMA_API_KEY = "..."
+adp-unchained auth ollama --method api
 ```
 
-Browser execution happens in the user's already-open Chrome/Edge profile. The model receives semantic controls rather than raw form values.
+When `OLLAMA_API_KEY` is available, the model router can send Ollama Cloud Responses requests directly. Otherwise it uses the signed-in local Ollama daemon.
 
-A useful first test inside `codex-unchained` is:
+### Antigravity / AGY
+
+Use the official `agy` Google sign-in/session:
+
+```bash
+adp-unchained auth agy
+```
+
+If `agy` is already authenticated, Unchained validates the existing session and lists visible models. Otherwise it launches `agy` interactively so its normal Google sign-in flow can complete.
+
+Antigravity is an explicit provider in v0.2: select one of its discovered models with `/model`. The automatic `/adp` modes do not silently route account quota through AGY.
+
+## Install
+
+### Linux and macOS
+
+The bootstrap installer selects the matching release artifact, installs all three binaries, creates the isolated Unchained configuration, installs the browser extension files and AGY brain adapter, and defaults to `adp/auto`.
+
+```bash
+sh install.sh
+```
+
+The default binary location is:
+
+```text
+~/.local/bin/codex-unchained
+~/.local/bin/adp-mcp
+~/.local/bin/adp-unchained
+```
+
+The installer creates/updates:
+
+```text
+~/.codex-unchained/config.toml
+~/.codex-unchained/extension/
+~/.gemini/config/agents/adp-unchained-brain/
+```
+
+Then authenticate the providers you want and run:
+
+```bash
+adp-unchained auth ollama
+codex-unchained
+```
+
+### Windows
+
+The release bootstrap installs the patched Codex binary, ADP MCP/model router, auth helper, browser extension and required Windows sandbox helpers. It creates an isolated `~/.codex-unchained` configuration with `adp/auto` as the default.
+
+For the unpacked Windows package:
+
+```powershell
+.\INSTALL-CODEX-WINDOWS.ps1 -AddToPath
+```
+
+Then:
+
+```powershell
+adp-unchained auth ollama
+codex-unchained
+```
+
+## Build locally
+
+From `codex-unchained/`:
+
+```bash
+cargo build -p adp-unchained -p adp-mcp --release
+cargo test --workspace
+```
+
+The patched Codex binary itself is produced by the upstream compatibility/package workflows, which fetch the pinned OpenAI Codex revision and apply the reproducible files in `upstream-patches/`.
+
+## Browser and computer-use layer
+
+`adp-mcp` hosts:
+
+```text
+127.0.0.1:8765  ADP browser broker
+127.0.0.1:8766  Codex Unchained model router
+```
+
+The packaged extension binds the broker to the user's already-open Chrome/Edge profile. Models receive host tools rather than owning a separate browser runtime, so changing the reasoning backend does not change the browser/shell/MCP layer.
+
+A useful first browser test is:
 
 ```text
 Use the ADP browser tools to inspect the active browser tab. Tell me the title,
@@ -132,84 +212,61 @@ URL, and visible interactive elements. Do not click or modify anything.
 
 ## Model router
 
-`adp-mcp.exe` hosts two local services:
+The router exposes:
 
 ```text
-127.0.0.1:8765  ADP browser broker
-127.0.0.1:8766  Codex Unchained model router
+GET  http://127.0.0.1:8766/v1/models
+POST http://127.0.0.1:8766/v1/responses
 ```
 
-The router exposes a Codex-compatible `/v1/models` catalog and `/v1/responses` route. Ollama requests are proxied through the local daemon. Antigravity requests are translated between Codex Responses events and the authenticated `agy` headless interface.
+Virtual `adp/*` model IDs are resolved per request by the ADP policy engine. Exact `ollama-local/*`, `ollama-cloud/*`, and `antigravity/*` IDs remain available through `/model`.
 
-This keeps the invariant:
+The invariant is:
 
 ```text
 switch the brain
 do not switch the agent
 ```
 
-## Web
-
-Host web search/fetch is independent of the reasoning model. If using ADP's Ollama-backed host web endpoint, set:
-
-```powershell
-$env:OLLAMA_API_KEY = "..."
-```
-
-Browser tools remain available without that web credential.
-
 ## Teach and replay
 
-Teach a workflow by demonstrating it in the bound browser:
+Record a browser workflow:
 
-```powershell
-adp-unchained teach helium-export --project D:\MyProject
+```bash
+adp-unchained teach helium-export --project /path/to/project
 ```
 
-Press Ctrl+C when the demonstration is finished. The recorder persists semantic steps incrementally.
+Replay it:
 
-Replay it later:
-
-```powershell
-adp-unchained replay helium-export --project D:\MyProject --keyword "bee wax wrap"
+```bash
+adp-unchained replay helium-export --project /path/to/project --keyword "bee wax wrap"
 ```
 
-Replay first tries the learned workflow with zero model calls. On state divergence it can use the configured local repair model. A primary/cloud repair model is only used when configured and local repair fails. Repairs are saved only after verification.
+Replay first attempts the learned semantic workflow with zero model calls. On state divergence it can use the configured local repair model and optionally escalate to a cloud repair model. A repair is persisted only after verification.
 
-## Privacy and safety of learned workflows
+Teach/replay does not persist passwords, tokens, OTP/MFA values, payment fields, cookies, screenshots, raw DOM, or arbitrary typed form values. Search/query/keyword text is represented as `[TEACH_KEYWORD]`.
 
-Teach/replay intentionally does not persist passwords, tokens, OTP/MFA values, payment fields, cookies, screenshots, raw DOM, or arbitrary typed form values. Search/query/keyword text is represented as the runtime placeholder `[TEACH_KEYWORD]`.
+## Upstream Codex compatibility
 
-Potentially consequential clicks are learned but are not marked safe for deterministic replay.
+`upstream-patches/` pins an exact OpenAI Codex revision and applies reproducible transformations that:
 
-## Upstream Codex compatibility surgery
+1. preserve provider wire dialect for tool search;
+2. keep local tool discovery and skill/plugin/app guidance enabled for custom models;
+3. give this distribution its own `~/.codex-unchained` home and `codex-unchained` command identity;
+4. add the native `/adp` routing command without replacing native `/model`.
 
-`upstream-patches/` pins an exact OpenAI Codex revision and contains reproducible source transformations that:
+Codex approval and sandbox machinery remain part of the patched Codex distribution. ADP browser/web execution remains ADP-owned.
 
-1. preserve provider wire dialect for `tool_search`, supporting both native specialized calls and compatible function-call providers;
-2. keep local tool discovery plus skill/plugin/app guidance enabled for unknown/custom model fallback metadata;
-3. give the patched distribution its own `~/.codex-unchained` home and `codex-unchained` command identity.
+## CI and packages
 
-`.github/workflows/codex-upstream-compat.yml` fetches the pinned upstream revision, applies all transformations, checks formatting, and runs focused upstream Codex tests.
+CI validates the Rust workspace, formatting, Clippy/tests, extension syntax, upstream Codex patch application, focused upstream tests, and package smoke tests.
 
-The ADP Browser/Web runtimes remain ADP-owned rather than depending on a proprietary browser helper. Codex approval and sandbox machinery is retained.
+Cross-platform package targets:
 
-## Windows package
+- Linux x64;
+- Linux arm64;
+- macOS x64;
+- macOS arm64;
+- Windows x64.
 
-The packaging workflow builds two artifacts:
-
-- `adp-unchained-windows-x64`;
-- `patched-codex-windows-x64`.
-
-The patched package smoke-tests:
-
-- upstream patch application;
-- `codex-unchained` command identity;
-- ADP MCP/model-router compilation;
-- isolated installer behavior;
-- dedicated `~/.codex-unchained` config generation;
-- no creation of normal `~/.codex` by the installer.
-
-## Branch isolation
-
-This implementation remains intentionally isolated from `main`. It does not overwrite the older Python ADP tree or any newer local Rust migration that has not been pushed to GitHub.
+The v0.2 work stays isolated from `main` and the stable `codex-unchained-v0.1` branch until validation is complete.
