@@ -98,7 +98,7 @@ jobs:
           cargo build -p codex-windows-sandbox-service --bin codex-windows-sandbox-service --release
           Pop-Location
           Push-Location (Join-Path $env:GITHUB_WORKSPACE "codex-unchained")
-          cargo build -p adp-mcp --release
+          cargo build -p adp-unchained -p adp-mcp --release
           Pop-Location
 
       - name: Smoke patched Codex
@@ -109,6 +109,7 @@ jobs:
           $help = (& $exe --help | Out-String)
           if ($help -notmatch "Usage: codex-unchained") { throw "Unchained command identity smoke failed" }
           $help | Select-Object -First 40
+          & (Join-Path $env:GITHUB_WORKSPACE "codex-unchained\target\release\adp-unchained.exe") auth --help
 
       - name: Assemble patched Codex artifact
         shell: pwsh
