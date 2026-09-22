@@ -71,6 +71,7 @@ jobs:
           python3 codex-unchained/upstream-patches/apply_0001.py "$CODEX_UPSTREAM_ROOT"
           python3 codex-unchained/upstream-patches/apply_0002.py "$CODEX_UPSTREAM_ROOT"
           python3 codex-unchained/upstream-patches/apply_0003.py "$CODEX_UPSTREAM_ROOT"
+          python3 codex-unchained/upstream-patches/apply_0004.py "$CODEX_UPSTREAM_ROOT"
           git -C "$CODEX_UPSTREAM_ROOT" diff --check
 
       - name: Raise codex-chatgpt recursion limit
