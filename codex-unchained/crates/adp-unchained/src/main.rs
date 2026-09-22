@@ -204,18 +204,9 @@ async fn auth_provider(args: AuthArgs) -> Result<(), Box<dyn Error>> {
                 return Err(format!("ollama signin exited with status {status}").into());
             }
 
-            let client = OllamaClient::new(OllamaConfig {
-                transport: OllamaTransport::Cloud,
-                model: "gpt-oss:120b-cloud".to_string(),
-                base_url: None,
-                // A browser/CLI sign-in is consumed by the local Ollama daemon,
-                // so the direct cloud API key is intentionally not required.
-                api_key_env: Some("__ADP_OLLAMA_SIGNIN_SESSION__".to_string()),
-            })?;
             println!(
                 "Ollama sign-in completed. Cloud models will be fetched by the Unchained router through the signed-in local daemon."
             );
-            drop(client);
         }
         (AuthProviderArg::Ollama, AuthMethodArg::Api) => {
             let key = std::env::var(&args.api_key_env)
