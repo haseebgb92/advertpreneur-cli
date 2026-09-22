@@ -35,6 +35,7 @@ jobs:
           python codex-unchained/upstream-patches/apply_0001.py /tmp/codex
           python codex-unchained/upstream-patches/apply_0002.py /tmp/codex
           python codex-unchained/upstream-patches/apply_0003.py /tmp/codex
+          python codex-unchained/upstream-patches/apply_0004.py /tmp/codex
       - name: Validate patch formatting
         shell: bash
         run: |
@@ -51,7 +52,10 @@ jobs:
             codex-rs/models-manager/src/model_info.rs \
             codex-rs/models-manager/src/model_info_tests.rs \
             codex-rs/utils/home-dir/src/lib.rs \
-            codex-rs/cli/src/main.rs
+            codex-rs/cli/src/main.rs \
+            codex-rs/tui/src/slash_command.rs \
+            codex-rs/tui/src/chatwidget/slash_dispatch.rs \
+            codex-rs/tui/src/chatwidget/settings.rs
       - name: Run focused Codex compatibility tests
         working-directory: /tmp/codex/codex-rs
         run: |
@@ -59,3 +63,4 @@ jobs:
           cargo test -p codex-core tool_search_payloads_roundtrip_as_tool_search_outputs --lib
           cargo test -p codex-models-manager unknown_model_keeps_local_tool_discovery_and_extension_instructions --lib
           cargo test -p codex-utils-home-dir find_codex_home_without_env_uses_default_home_dir --lib
+          cargo test -p codex-tui adp_supports_inline_routing_modes --lib
