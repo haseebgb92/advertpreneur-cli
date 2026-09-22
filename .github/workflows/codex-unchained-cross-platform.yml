@@ -50,6 +50,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Validate POSIX bootstrap syntax
         if: runner.os != 'Windows'
@@ -62,8 +64,6 @@ jobs:
         run: |
           $source = Get-Content "codex-unchained/install.ps1" -Raw
           $null = [scriptblock]::Create($source)
-        with:
-          targets: ${{ matrix.target }}
 
       - name: Fetch pinned upstream Codex
         shell: bash
