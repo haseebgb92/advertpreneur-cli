@@ -86,6 +86,7 @@ jobs:
           python "codex-unchained\upstream-patches\apply_0001.py" "$env:CODEX_UPSTREAM_ROOT"
           python "codex-unchained\upstream-patches\apply_0002.py" "$env:CODEX_UPSTREAM_ROOT"
           python "codex-unchained\upstream-patches\apply_0003.py" "$env:CODEX_UPSTREAM_ROOT"
+          python "codex-unchained\upstream-patches\apply_0004.py" "$env:CODEX_UPSTREAM_ROOT"
           git -C "$env:CODEX_UPSTREAM_ROOT" diff --check
 
       - name: Build patched Codex CLI and ADP MCP bridge
