@@ -167,6 +167,8 @@ jobs:
           if ($text -notmatch '\[model_providers\.unchained\]') { throw "Unchained provider block missing" }
           if ($text -notmatch 'model_catalog_url\s*=\s*"http://127\.0\.0\.1:8766/v1/models"') { throw "Unchained model catalog URL missing" }
           if ($text -notmatch '\[mcp_servers\.adp\]') { throw "ADP MCP block missing" }
+          if ($text -notmatch 'model\s*=\s*"adp/auto"') { throw "Legacy v0.1 default was not migrated to ADP Auto" }
+          if (-not (Test-Path (Join-Path $install "adp-unchained.exe"))) { throw "ADP auth/helper CLI missing" }
           if (-not (Test-Path (Join-Path $install "codex-windows-sandbox-setup.exe"))) { throw "Windows sandbox setup helper missing" }
           if (-not (Test-Path (Join-Path $install "codex-windows-sandbox-service.exe"))) { throw "Windows sandbox service helper missing" }
           if (-not (Test-Path (Join-Path $install "codex-command-runner.exe"))) { throw "Windows command runner helper missing" }
