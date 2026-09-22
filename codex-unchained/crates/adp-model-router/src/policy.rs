@@ -67,15 +67,34 @@ impl TaskSignals {
             coding: contains_any(
                 &lower,
                 &[
-                    "code", "coding", "rust", "python", "typescript", "javascript", "compile",
-                    "build", "repo", "repository", "refactor", "patch", "function", "class",
+                    "code",
+                    "coding",
+                    "rust",
+                    "python",
+                    "typescript",
+                    "javascript",
+                    "compile",
+                    "build",
+                    "repo",
+                    "repository",
+                    "refactor",
+                    "patch",
+                    "function",
+                    "class",
                 ],
             ),
             debugging: contains_any(
                 &lower,
                 &[
-                    "debug", "error", "failing", "failed", "failure", "stack trace", "compiler",
-                    "test failure", "fix",
+                    "debug",
+                    "error",
+                    "failing",
+                    "failed",
+                    "failure",
+                    "stack trace",
+                    "compiler",
+                    "test failure",
+                    "fix",
                 ],
             ),
             vision: lower.contains("input_image")
@@ -119,22 +138,48 @@ fn score_candidate(mode: AdpMode, signals: TaskSignals, id: &str) -> i32 {
 
     let mut score = match mode {
         AdpMode::Economy => {
-            if is_local { 85 } else if is_cloud { 70 } else { 0 }
+            if is_local {
+                85
+            } else if is_cloud {
+                70
+            } else {
+                0
+            }
         }
         AdpMode::Auto => {
-            if is_cloud { 80 } else if is_local { 55 } else { 0 }
+            if is_cloud {
+                80
+            } else if is_local {
+                55
+            } else {
+                0
+            }
         }
         AdpMode::Balanced => {
-            if is_cloud { 95 } else if is_local { 35 } else { 0 }
+            if is_cloud {
+                95
+            } else if is_local {
+                35
+            } else {
+                0
+            }
         }
         AdpMode::Max => {
-            if is_cloud { 115 } else if is_local { 15 } else { 0 }
+            if is_cloud {
+                115
+            } else if is_local {
+                15
+            } else {
+                0
+            }
         }
     };
 
     let cheap = contains_any(
         &lower,
-        &["flash", "mini", "lite", "20b", "8b", "7b", "4b", "3b", "1.7b"],
+        &[
+            "flash", "mini", "lite", "20b", "8b", "7b", "4b", "3b", "1.7b",
+        ],
     );
     let capable = contains_any(
         &lower,
@@ -145,48 +190,98 @@ fn score_candidate(mode: AdpMode, signals: TaskSignals, id: &str) -> i32 {
     let flagship = contains_any(
         &lower,
         &[
-            "kimi-k3", "k3", "glm-5.3", "qwen3-max", "max", "pro", "671b", "480b",
-            "235b", "120b",
+            "kimi-k3",
+            "k3",
+            "glm-5.3",
+            "qwen3-max",
+            "max",
+            "pro",
+            "671b",
+            "480b",
+            "235b",
+            "120b",
         ],
     );
     let preferred_economy = contains_any(
         &lower,
-        &["glm-5.3-flash", "deepseek-v4.1-flash", "gpt-oss:120b", "gpt-oss-120b"],
+        &[
+            "glm-5.3-flash",
+            "deepseek-v4.1-flash",
+            "gpt-oss:120b",
+            "gpt-oss-120b",
+        ],
     );
     let preferred_balanced = contains_any(
         &lower,
         &[
-            "glm-5.3-flash", "deepseek-v4.1-flash", "minimax-m3", "kimi-k2.7-code",
+            "glm-5.3-flash",
+            "deepseek-v4.1-flash",
+            "minimax-m3",
+            "kimi-k2.7-code",
             "glm-5.3",
         ],
     );
     let preferred_max = contains_any(
         &lower,
-        &["kimi-k3", "glm-5.3", "kimi-k2.7-code", "qwen3-max", "qwen3-coder"],
+        &[
+            "kimi-k3",
+            "glm-5.3",
+            "kimi-k2.7-code",
+            "qwen3-max",
+            "qwen3-coder",
+        ],
     );
 
     match mode {
         AdpMode::Economy => {
-            if cheap { score += 28; }
-            if preferred_economy { score += 40; }
-            if flagship && !preferred_economy { score -= 30; }
+            if cheap {
+                score += 28;
+            }
+            if preferred_economy {
+                score += 40;
+            }
+            if flagship && !preferred_economy {
+                score -= 30;
+            }
         }
         AdpMode::Auto => {
-            if cheap { score += 18; }
-            if preferred_economy { score += 35; }
-            if signals.complex() && flagship { score += 35; }
-            if signals.complex() && cheap { score -= 10; }
+            if cheap {
+                score += 18;
+            }
+            if preferred_economy {
+                score += 35;
+            }
+            if signals.complex() && flagship {
+                score += 35;
+            }
+            if signals.complex() && cheap {
+                score -= 10;
+            }
         }
         AdpMode::Balanced => {
-            if preferred_balanced { score += 40; }
-            if capable { score += 15; }
-            if flagship { score += 10; }
-            if cheap && !preferred_balanced { score -= 8; }
+            if preferred_balanced {
+                score += 40;
+            }
+            if capable {
+                score += 15;
+            }
+            if flagship {
+                score += 10;
+            }
+            if cheap && !preferred_balanced {
+                score -= 8;
+            }
         }
         AdpMode::Max => {
-            if preferred_max { score += 60; }
-            if flagship { score += 35; }
-            if cheap { score -= 45; }
+            if preferred_max {
+                score += 60;
+            }
+            if flagship {
+                score += 35;
+            }
+            if cheap {
+                score -= 45;
+            }
         }
     }
 
@@ -199,11 +294,18 @@ fn score_candidate(mode: AdpMode, signals: TaskSignals, id: &str) -> i32 {
     if signals.browser_or_web {
         // Browser/computer-use turns benefit from capable cloud reasoning, but
         // do not need the most expensive model in Economy/Auto.
-        if is_cloud && capable { score += 12; }
-        if is_local && mode != AdpMode::Economy { score -= 20; }
+        if is_cloud && capable {
+            score += 12;
+        }
+        if is_local && mode != AdpMode::Economy {
+            score -= 20;
+        }
     }
     if signals.vision
-        && contains_any(&lower, &["vision", "vl", "kimi", "minimax", "glm", "deepseek"])
+        && contains_any(
+            &lower,
+            &["vision", "vl", "kimi", "minimax", "glm", "deepseek"],
+        )
     {
         score += 15;
     }
@@ -259,7 +361,8 @@ mod tests {
 
     #[test]
     fn economy_prefers_inexpensive_ollama_candidates() {
-        let request = json!({"input":"browse a page and collect the title","tools":[{"name":"browser"}]});
+        let request =
+            json!({"input":"browse a page and collect the title","tools":[{"name":"browser"}]});
         let ranked = ordered_candidates(AdpMode::Economy, &request, candidates());
         assert!(ranked[0].contains("flash") || ranked[0].starts_with("ollama-local/"));
         assert!(!ranked.iter().any(|id| id.starts_with("antigravity/")));
@@ -267,7 +370,8 @@ mod tests {
 
     #[test]
     fn max_prefers_flagship_cloud_models() {
-        let request = json!({"input":"perform a difficult repository-wide refactor and debug failures"});
+        let request =
+            json!({"input":"perform a difficult repository-wide refactor and debug failures"});
         let ranked = ordered_candidates(AdpMode::Max, &request, candidates());
         assert!(ranked[0].contains("kimi-k3") || ranked[0].contains("glm-5.3"));
     }
