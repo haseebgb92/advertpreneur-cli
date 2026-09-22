@@ -212,7 +212,9 @@ async fn auth_provider(args: AuthArgs) -> Result<(), Box<dyn Error>> {
                 // so the direct cloud API key is intentionally not required.
                 api_key_env: Some("__ADP_OLLAMA_SIGNIN_SESSION__".to_string()),
             })?;
-            println!("Ollama sign-in completed. Cloud models will be fetched by the Unchained router through the signed-in local daemon.");
+            println!(
+                "Ollama sign-in completed. Cloud models will be fetched by the Unchained router through the signed-in local daemon."
+            );
             drop(client);
         }
         (AuthProviderArg::Ollama, AuthMethodArg::Api) => {
@@ -241,14 +243,19 @@ async fn auth_provider(args: AuthArgs) -> Result<(), Box<dyn Error>> {
         (AuthProviderArg::Agy, AuthMethodArg::Login) => {
             let client = AntigravityClient::new();
             if let Ok(models) = client.list_models() {
-                println!("Antigravity CLI already has an authenticated session. Visible models: {}", models.len());
+                println!(
+                    "Antigravity CLI already has an authenticated session. Visible models: {}",
+                    models.len()
+                );
                 for model in models.iter().take(12) {
                     println!("  {} ({})", model.label, model.slug);
                 }
                 return Ok(());
             }
 
-            println!("Launching the official Antigravity CLI. Complete Google Sign-In there, then exit AGY to return to Unchained.");
+            println!(
+                "Launching the official Antigravity CLI. Complete Google Sign-In there, then exit AGY to return to Unchained."
+            );
             let status = ProcessCommand::new("agy")
                 .stdin(Stdio::inherit())
                 .stdout(Stdio::inherit())
@@ -259,7 +266,10 @@ async fn auth_provider(args: AuthArgs) -> Result<(), Box<dyn Error>> {
             }
 
             let models = client.list_models()?;
-            println!("Antigravity session detected. Visible models: {}", models.len());
+            println!(
+                "Antigravity session detected. Visible models: {}",
+                models.len()
+            );
             for model in models.iter().take(12) {
                 println!("  {} ({})", model.label, model.slug);
             }
