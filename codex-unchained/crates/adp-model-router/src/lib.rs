@@ -1,6 +1,9 @@
 #![recursion_limit = "256"]
 
+mod policy;
+
 use adp_model::{AntigravityClient, AntigravityResponse};
+use policy::{AdpMode, ordered_candidates};
 use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
@@ -8,6 +11,7 @@ use axum::http::{Response, StatusCode, header};
 use axum::routing::{get, post};
 use reqwest::Client;
 use serde_json::{Value, json};
+use std::env;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use uuid::Uuid;
@@ -68,6 +72,39 @@ async fn build_catalog(state: &ModelRouterState) -> Result<Vec<Value>, String> {
 
     let (local, cloud, agy) = tokio::join!(local, cloud, agy);
     let mut models = Vec::new();
+
+    for (index, (slug, label, description)) in [
+        (
+            "adp/auto",
+            "[ADP] Auto",
+            "Automatically uses the least-expensive capable Ollama model and moves upward for harder turns.",
+        ),
+        (
+            "adp/economy",
+            "[ADP] Economy",
+            "Aggressively minimizes cloud cost while retaining Ollama tool-capable fallbacks.",
+        ),
+        (
+            "adp/balanced",
+            "[ADP] Balanced",
+            "Prefers strong cost-efficient cloud models for everyday coding and agent work.",
+        ),
+        (
+            "adp/max",
+            "[ADP] Max",
+            "Prefers the strongest available Ollama Cloud model for difficult work.",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        models.push(model_info(
+            slug.to_string(),
+            label.to_string(),
+            description,
+            index as i32,
+        ));
+    }
 
     if let Ok(names) = local {
         for (index, name) in names.into_iter().enumerate() {
@@ -197,17 +234,17 @@ async fn responses(
         );
     };
 
+    if let Some(mode) = AdpMode::from_virtual_model(&model) {
+        return route_adp_mode(&state, mode, request).await;
+    }
+
     if let Some(actual) = model.strip_prefix(OLLAMA_LOCAL_PREFIX) {
         request["model"] = Value::String(actual.to_string());
         return proxy_ollama(&state.http, request).await;
     }
 
     if let Some(actual) = model.strip_prefix(OLLAMA_CLOUD_PREFIX) {
-        if let Err(error) = ensure_ollama_model(&state.http, actual).await {
-            return json_response(StatusCode::BAD_GATEWAY, json!({"error":{"message": error}}));
-        }
-        request["model"] = Value::String(actual.to_string());
-        return proxy_ollama(&state.http, request).await;
+        return proxy_ollama_cloud(&state.http, actual, request).await;
     }
 
     if let Some(actual) = model.strip_prefix(ANTIGRAVITY_PREFIX) {
@@ -218,6 +255,99 @@ async fn responses(
         StatusCode::BAD_REQUEST,
         json!({"error":{"message": format!("unknown Unchained model id: {model}")}}),
     )
+}
+
+async fn route_adp_mode(
+    state: &ModelRouterState,
+    mode: AdpMode,
+    mut request: Value,
+) -> Response<Body> {
+    let local_endpoint = format!("{OLLAMA_LOCAL}/api/tags");
+    let local = fetch_ollama_tags(&state.http, &local_endpoint);
+    let cloud = fetch_ollama_tags(&state.http, OLLAMA_CLOUD_CATALOG);
+    let (local, cloud) = tokio::join!(local, cloud);
+
+    let mut candidates = Vec::new();
+    if let Ok(names) = local {
+        candidates.extend(
+            names
+                .into_iter()
+                .map(|name| format!("{OLLAMA_LOCAL_PREFIX}{name}")),
+        );
+    }
+    if let Ok(names) = cloud {
+        candidates.extend(
+            names
+                .into_iter()
+                .map(|name| format!("{OLLAMA_CLOUD_PREFIX}{name}")),
+        );
+    }
+
+    let ranked = ordered_candidates(mode, &request, candidates);
+    let Some(selected) = ranked.into_iter().next() else {
+        return json_response(
+            StatusCode::BAD_GATEWAY,
+            json!({"error":{"message": format!(
+                "ADP {} could not find an available Ollama local/cloud model. Start Ollama, run 'ollama signin', or provide OLLAMA_API_KEY.",
+                mode.label()
+            )}}),
+        );
+    };
+
+    eprintln!("ADP {} routed turn to {}", mode.label(), selected);
+
+    if let Some(actual) = selected.strip_prefix(OLLAMA_LOCAL_PREFIX) {
+        request["model"] = Value::String(actual.to_string());
+        return proxy_ollama(&state.http, request).await;
+    }
+
+    if let Some(actual) = selected.strip_prefix(OLLAMA_CLOUD_PREFIX) {
+        return proxy_ollama_cloud(&state.http, actual, request).await;
+    }
+
+    json_response(
+        StatusCode::BAD_GATEWAY,
+        json!({"error":{"message": format!("ADP {} selected an invalid backend: {selected}", mode.label())}}),
+    )
+}
+
+async fn proxy_ollama_cloud(
+    http: &Client,
+    model: &str,
+    mut request: Value,
+) -> Response<Body> {
+    request["model"] = Value::String(model.to_string());
+
+    if let Ok(api_key) = env::var("OLLAMA_API_KEY")
+        && !api_key.trim().is_empty()
+    {
+        return proxy_ollama_api(http, request, &api_key).await;
+    }
+
+    if let Err(error) = ensure_ollama_model(http, model).await {
+        return json_response(StatusCode::BAD_GATEWAY, json!({"error":{"message": error}}));
+    }
+    proxy_ollama(http, request).await
+}
+
+async fn proxy_ollama_api(http: &Client, request: Value, api_key: &str) -> Response<Body> {
+    let upstream = match http
+        .post("https://ollama.com/v1/responses")
+        .bearer_auth(api_key)
+        .json(&request)
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            return json_response(
+                StatusCode::BAD_GATEWAY,
+                json!({"error":{"message": format!("Ollama Cloud API request failed: {error}")}}),
+            );
+        }
+    };
+
+    stream_upstream(upstream)
 }
 
 async fn proxy_ollama(http: &Client, request: Value) -> Response<Body> {
@@ -236,6 +366,10 @@ async fn proxy_ollama(http: &Client, request: Value) -> Response<Body> {
         }
     };
 
+    stream_upstream(upstream)
+}
+
+fn stream_upstream(upstream: reqwest::Response) -> Response<Body> {
     let status =
         StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let content_type = upstream
