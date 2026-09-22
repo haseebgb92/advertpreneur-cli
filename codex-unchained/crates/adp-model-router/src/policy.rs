@@ -329,9 +329,9 @@ fn collect_strings(value: &Value, out: &mut String) {
                 if matches!(
                     key.as_str(),
                     "text" | "content" | "input_text" | "output_text" | "instructions"
-                ) {
-                    collect_strings(value, out);
-                } else if value.is_array() || value.is_object() {
+                ) || value.is_array()
+                    || value.is_object()
+                {
                     collect_strings(value, out);
                 }
             }
