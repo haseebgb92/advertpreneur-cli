@@ -158,7 +158,6 @@ pub enum ModelError {
     },
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodexAccountModel {
     pub slug: String,
@@ -252,14 +251,18 @@ impl OfficialCodexClient {
         schema: &Value,
     ) -> Result<Value, ModelError> {
         let temp_root = env::temp_dir().join(format!("adp-codex-{}", Uuid::new_v4().simple()));
-        fs::create_dir_all(&temp_root)
-            .map_err(|err| ModelError::InvalidPayload(format!("could not create Codex adapter temp directory: {err}")))?;
+        fs::create_dir_all(&temp_root).map_err(|err| {
+            ModelError::InvalidPayload(format!(
+                "could not create Codex adapter temp directory: {err}"
+            ))
+        })?;
         let schema_path = temp_root.join("decision-schema.json");
         let output_path = temp_root.join("decision.json");
         let schema_bytes = serde_json::to_vec(schema)
             .map_err(|err| ModelError::InvalidPayload(err.to_string()))?;
-        fs::write(&schema_path, schema_bytes)
-            .map_err(|err| ModelError::InvalidPayload(format!("could not write Codex decision schema: {err}")))?;
+        fs::write(&schema_path, schema_bytes).map_err(|err| {
+            ModelError::InvalidPayload(format!("could not write Codex decision schema: {err}"))
+        })?;
 
         let mut command = self.command();
         command
@@ -318,8 +321,9 @@ impl OfficialCodexClient {
         });
         let _ = fs::remove_dir_all(&temp_root);
         let body = body?;
-        serde_json::from_str::<Value>(&body)
-            .map_err(|err| ModelError::InvalidPayload(format!("Codex decision was not valid JSON: {err}")))
+        serde_json::from_str::<Value>(&body).map_err(|err| {
+            ModelError::InvalidPayload(format!("Codex decision was not valid JSON: {err}"))
+        })
     }
 }
 
@@ -336,12 +340,15 @@ fn official_codex_home() -> Option<PathBuf> {
 }
 
 pub fn parse_codex_models(output: &str) -> Result<Vec<CodexAccountModel>, ModelError> {
-    let payload: Value = serde_json::from_str(output)
-        .map_err(|err| ModelError::InvalidPayload(format!("Codex model catalog was not valid JSON: {err}")))?;
+    let payload: Value = serde_json::from_str(output).map_err(|err| {
+        ModelError::InvalidPayload(format!("Codex model catalog was not valid JSON: {err}"))
+    })?;
     let entries = payload
         .get("models")
         .and_then(Value::as_array)
-        .ok_or_else(|| ModelError::InvalidPayload("Codex model catalog has no 'models' array".to_string()))?;
+        .ok_or_else(|| {
+            ModelError::InvalidPayload("Codex model catalog has no 'models' array".to_string())
+        })?;
 
     let mut models = entries
         .iter()

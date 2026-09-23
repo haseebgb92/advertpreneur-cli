@@ -2,7 +2,9 @@ use adp_agent::{AgentRuntime, BROWSER_CLICK, BROWSER_FILL, BROWSER_INSPECT, Tool
 use adp_browser_broker::{BrokerState, serve};
 use adp_executor::{ReplayOutcome, WorkflowExecutor, verify_repair_candidate};
 use adp_memory::{ProjectMemory, SemanticTarget, TEACH_KEYWORD, WorkflowRepair, WorkflowStep};
-use adp_model::{AntigravityClient, OfficialCodexClient, OllamaClient, OllamaConfig, OllamaTransport};
+use adp_model::{
+    AntigravityClient, OfficialCodexClient, OllamaClient, OllamaConfig, OllamaTransport,
+};
 use adp_protocol::ExecutionContext;
 use adp_teach::{TeachConfig, TeachRecordOutcome, TeachRecorder};
 use adp_web::{WebClient, WebConfig};

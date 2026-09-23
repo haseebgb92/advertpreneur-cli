@@ -454,8 +454,8 @@ async fn codex_response(
 ) -> Response<Body> {
     let prompt = provider_decision_prompt(&request, "official Codex/OpenAI");
     let schema = decision_schema();
-    let result = tokio::task::spawn_blocking(move || client.chat_structured(&model, &prompt, &schema))
-        .await;
+    let result =
+        tokio::task::spawn_blocking(move || client.chat_structured(&model, &prompt, &schema)).await;
 
     let decision = match result {
         Ok(Ok(decision)) => decision,
@@ -557,19 +557,25 @@ fn decision_sse(decision: Value, usage: Option<&AntigravityResponse>) -> Respons
         }
     }
 
-    let usage = usage.map(|response| json!({
-        "input_tokens": response.usage.input_tokens,
-        "input_tokens_details":{"cached_tokens":response.usage.cache_read_tokens},
-        "output_tokens": response.usage.output_tokens,
-        "output_tokens_details":{"reasoning_tokens":response.usage.thinking_tokens},
-        "total_tokens": response.usage.total_tokens
-    })).unwrap_or_else(|| json!({
-        "input_tokens": 0,
-        "input_tokens_details":{"cached_tokens":0},
-        "output_tokens": 0,
-        "output_tokens_details":{"reasoning_tokens":0},
-        "total_tokens": 0
-    }));
+    let usage = usage
+        .map(|response| {
+            json!({
+                "input_tokens": response.usage.input_tokens,
+                "input_tokens_details":{"cached_tokens":response.usage.cache_read_tokens},
+                "output_tokens": response.usage.output_tokens,
+                "output_tokens_details":{"reasoning_tokens":response.usage.thinking_tokens},
+                "total_tokens": response.usage.total_tokens
+            })
+        })
+        .unwrap_or_else(|| {
+            json!({
+                "input_tokens": 0,
+                "input_tokens_details":{"cached_tokens":0},
+                "output_tokens": 0,
+                "output_tokens_details":{"reasoning_tokens":0},
+                "total_tokens": 0
+            })
+        });
     events.push(json!({
         "type":"response.completed",
         "response":{"id":id,"usage":usage}
