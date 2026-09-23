@@ -100,12 +100,13 @@ try {
 [model_providers.unchained]
 name = "ADP Unchained Model Router"
 base_url = "http://127.0.0.1:8766/v1"
-model_catalog_url = "http://127.0.0.1:8766/v1/models"
 wire_api = "responses"
 requires_openai_auth = false
 "@
-        }
+        } 
 
+        # Remove the obsolete alpha.26 catalog key; the pinned Codex build discovers
+        # the ADP catalog from the provider base URL at /models.
         $text = $text -replace '(?m)^model_catalog_url\s*=.*(?:\r?\n)?', ''
 
         if ($text -notmatch '(?m)^\[mcp_servers\.adp\]
