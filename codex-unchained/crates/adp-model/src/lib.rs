@@ -250,6 +250,12 @@ impl OfficialCodexClient {
         prompt: &str,
         schema: &Value,
     ) -> Result<Value, ModelError> {
+        if !self.is_chatgpt_authenticated()? {
+            return Err(ModelError::InvalidPayload(
+                "official Codex is not authenticated with ChatGPT; refusing to fall back to API-key billing".to_string(),
+            ));
+        }
+
         let temp_root = env::temp_dir().join(format!("adp-codex-{}", Uuid::new_v4().simple()));
         fs::create_dir_all(&temp_root).map_err(|err| {
             ModelError::InvalidPayload(format!(
