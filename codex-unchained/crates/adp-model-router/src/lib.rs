@@ -787,7 +787,7 @@ mod tests {
             1,
         );
         assert_eq!(value["visibility"], "list");
-        assert_eq!(value["supports_search_tool"], true);
+        assert_eq!(value["supports_search_tool"], false);
         assert_eq!(value["node_repl_disabled"], false);
         assert!(
             value["base_instructions"]
