@@ -67,5 +67,5 @@ jobs:
           cargo test -p codex-models-manager unknown_model_keeps_local_tool_discovery_and_extension_instructions --lib
           cargo test -p codex-utils-home-dir find_codex_home_without_env_uses_default_home_dir --lib
           cargo test -p codex-tui adp_supports_inline_routing_modes --lib
-          grep -q "has_explicit_model_catalog" model-provider/src/models_endpoint.rs
-          grep -q "endpoint_client.has_explicit_model_catalog" models-manager/src/manager.rs
+          grep -q "has_authoritative_unauthenticated_catalog" model-provider/src/models_endpoint.rs
+          grep -q "has_authoritative_unauthenticated_catalog" models-manager/src/manager.rs

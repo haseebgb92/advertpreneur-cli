@@ -63,7 +63,6 @@ oss_provider = "ollama"
 [model_providers.unchained]
 name = "ADP Unchained Model Router"
 base_url = "http://127.0.0.1:8766/v1"
-model_catalog_url = "http://127.0.0.1:8766/v1/models"
 wire_api = "responses"
 requires_openai_auth = false
 
@@ -101,25 +100,11 @@ model_catalog_url = "http://127.0.0.1:8766/v1/models"
 wire_api = "responses"
 requires_openai_auth = false
 EOF
-  elif ! grep -q '^model_catalog_url[[:space:]]*=[[:space:]]*"http://127.0.0.1:8766/v1/models"' "$config"; then
-    awk '
-      BEGIN { in_provider=0; inserted=0 }
-      /^\[model_providers\.unchained\]$/ { in_provider=1 }
-      /^\[/ && $0 !~ /^\[model_providers\.unchained\]$/ && in_provider && !inserted {
-        print "model_catalog_url = \"http://127.0.0.1:8766/v1/models\""
-        inserted=1
-        in_provider=0
-      }
-      { print }
-      in_provider && /^base_url[[:space:]]*=/ && !inserted {
-        print "model_catalog_url = \"http://127.0.0.1:8766/v1/models\""
-        inserted=1
-      }
-      END {
-        if (in_provider && !inserted)
-          print "model_catalog_url = \"http://127.0.0.1:8766/v1/models\""
-      }
-    ' "$config" > "$config.tmp"
+  fi
+
+  # v0.2 alpha.26 wrote a model_catalog_url key that the pinned Codex config does not own.
+  if grep -q '^model_catalog_url[[:space:]]*=' "$config"; then
+    grep -v '^model_catalog_url[[:space:]]*=' "$config" > "$config.tmp"
     mv "$config.tmp" "$config"
   fi
 

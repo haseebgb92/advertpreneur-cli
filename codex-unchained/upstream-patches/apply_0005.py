@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Allow explicit Unchained model catalogs to refresh without OpenAI/API-key auth."""
+"""Make the ADP Unchained provider's local /models endpoint authoritative."""
 
 from __future__ import annotations
 
@@ -33,15 +33,15 @@ def main() -> None:
     fn identity(&self) -> Option<String> {""",
         """impl ModelsEndpointClient for OpenAiModelsEndpoint {
     fn supports_api_key_models(&self) -> bool {
-        self.provider_info.model_catalog_url.is_some() || self.provider_info.is_openai()
+        self.provider_info.is_openai()
     }
 
-    fn has_explicit_model_catalog(&self) -> bool {
-        self.provider_info.model_catalog_url.is_some()
+    fn has_authoritative_unauthenticated_catalog(&self) -> bool {
+        self.provider_info.name == "ADP Unchained Model Router"
     }
 
     fn identity(&self) -> Option<String> {""",
-        "explicit model catalog endpoint capability",
+        "ADP unauthenticated model catalog capability",
     )
     endpoint.write_text(endpoint_text, encoding="utf-8")
 
@@ -57,13 +57,13 @@ def main() -> None:
         false
     }
 
-    /// Returns whether the provider explicitly configured its own model catalog endpoint.
-    fn has_explicit_model_catalog(&self) -> bool {
+    /// Whether this provider owns an authoritative catalog that does not need auth.
+    fn has_authoritative_unauthenticated_catalog(&self) -> bool {
         false
     }
 
     /// Fetches the latest remote model catalog and optional ETag.""",
-        "model endpoint explicit catalog capability",
+        "model endpoint unauthenticated catalog capability",
     )
     manager_text = replace_once(
         manager_text,
@@ -73,12 +73,13 @@ def main() -> None:
             || self.supports_api_key_discovery()
     }""",
         """    async fn should_refresh_models(&self) -> bool {
-        self.endpoint_client.has_explicit_model_catalog()
+        self.endpoint_client
+            .has_authoritative_unauthenticated_catalog()
             || self.endpoint_client.uses_codex_backend().await
             || self.endpoint_client.has_command_auth()
             || self.supports_api_key_discovery()
     }""",
-        "explicit catalog refresh policy",
+        "ADP catalog refresh policy",
     )
     manager_text = replace_once(
         manager_text,
@@ -93,19 +94,21 @@ def main() -> None:
                         .auth_mode()
                         .is_some_and(AuthMode::has_chatgpt_account)
                 }));""",
-        """        // Explicit provider catalogs, ChatGPT catalogs, and API-key catalogs are authoritative.
+        """        // ADP, visible ChatGPT, and OpenAI API-key catalogs are authoritative.
         let remote_only = entry
             .models
             .iter()
             .any(|model| model.visibility == ModelVisibility::List)
-            && (self.endpoint_client.has_explicit_model_catalog()
+            && (self
+                .endpoint_client
+                .has_authoritative_unauthenticated_catalog()
                 || self.supports_api_key_discovery()
                 || self.auth_manager.as_ref().is_some_and(|auth_manager| {
                     auth_manager
                         .auth_mode()
                         .is_some_and(AuthMode::has_chatgpt_account)
                 }));""",
-        "explicit catalog authoritative merge policy",
+        "ADP catalog authoritative merge policy",
     )
     manager.write_text(manager_text, encoding="utf-8")
 

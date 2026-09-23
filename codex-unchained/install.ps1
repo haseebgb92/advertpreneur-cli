@@ -74,7 +74,6 @@ try {
             '[model_providers.unchained]'
             'name = "ADP Unchained Model Router"'
             'base_url = "http://127.0.0.1:8766/v1"'
-            'model_catalog_url = "http://127.0.0.1:8766/v1/models"'
             'wire_api = "responses"'
             'requires_openai_auth = false'
             ''
@@ -105,11 +104,42 @@ model_catalog_url = "http://127.0.0.1:8766/v1/models"
 wire_api = "responses"
 requires_openai_auth = false
 "@
-        } elseif ($text -notmatch 'model_catalog_url\s*=\s*"http://127\.0\.0\.1:8766/v1/models"') {
-            $text = $text -replace '(?m)(^\[model_providers\.unchained\][\s\S]*?^base_url\s*=\s*"http://127\.0\.0\.1:8766/v1"\s*$)', '$1' + "`r`nmodel_catalog_url = `"http://127.0.0.1:8766/v1/models`""
         }
 
-        if ($text -notmatch '(?m)^\[mcp_servers\.adp\]$') {
+        $text = $text -replace '(?m)^model_catalog_url\s*=.*(?:\r?\n)?', ''
+
+        if ($text -notmatch '(?m)^\[mcp_servers\.adp\]
+            $text += @"
+
+[mcp_servers.adp]
+command = "$mcpPath"
+startup_timeout_sec = 20
+"@
+        }
+
+        Set-Content -Path $config -Value $text -Encoding UTF8
+    }
+
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $parts = @($userPath -split ';' | Where-Object { $_ })
+    if ($parts -notcontains $installDir) {
+        [Environment]::SetEnvironmentVariable("Path", (($parts + $installDir) -join ";"), "User")
+    }
+
+    Write-Host "Codex Unchained installed."
+    Write-Host "Default routing: /adp auto"
+    Write-Host ""
+    Write-Host "Provider setup:"
+    Write-Host "  Ollama login:  adp-unchained auth ollama"
+    Write-Host "  Ollama API:    set OLLAMA_API_KEY, then run adp-unchained auth ollama --method api"
+    Write-Host "  Antigravity:   adp-unchained auth agy"
+    Write-Host ""
+    Write-Host "Open a new terminal and run: codex-unchained"
+}
+finally {
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+}
+) {
             $text += @"
 
 [mcp_servers.adp]
