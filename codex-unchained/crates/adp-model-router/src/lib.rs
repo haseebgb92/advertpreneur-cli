@@ -500,10 +500,8 @@ async fn antigravity_response(
         );
     }
 
-    let decision = normalize_provider_decision(
-        response.structured_output.clone(),
-        &response.response,
-    );
+    let decision =
+        normalize_provider_decision(response.structured_output.clone(), &response.response);
 
     decision_sse(decision, Some(&response))
 }
@@ -524,10 +522,16 @@ fn normalize_provider_decision(structured: Option<Value>, response: &str) -> Val
                     object
                         .entry("kind")
                         .or_insert_with(|| Value::String("function_call".to_string()));
-                    object.entry("text").or_insert_with(|| Value::String(String::new()));
-                    object.entry("namespace").or_insert_with(|| Value::String(String::new()));
+                    object
+                        .entry("text")
+                        .or_insert_with(|| Value::String(String::new()));
+                    object
+                        .entry("namespace")
+                        .or_insert_with(|| Value::String(String::new()));
                     object.entry("arguments").or_insert_with(|| json!({}));
-                    object.entry("input").or_insert_with(|| Value::String(String::new()));
+                    object
+                        .entry("input")
+                        .or_insert_with(|| Value::String(String::new()));
                     return Some(Value::Object(object));
                 }
 
@@ -538,10 +542,16 @@ fn normalize_provider_decision(structured: Option<Value>, response: &str) -> Val
                     {
                         return Some(normalized);
                     }
-                    object.entry("name").or_insert_with(|| Value::String(String::new()));
-                    object.entry("namespace").or_insert_with(|| Value::String(String::new()));
+                    object
+                        .entry("name")
+                        .or_insert_with(|| Value::String(String::new()));
+                    object
+                        .entry("namespace")
+                        .or_insert_with(|| Value::String(String::new()));
                     object.entry("arguments").or_insert_with(|| json!({}));
-                    object.entry("input").or_insert_with(|| Value::String(String::new()));
+                    object
+                        .entry("input")
+                        .or_insert_with(|| Value::String(String::new()));
                     return Some(Value::Object(object));
                 }
 
@@ -563,7 +573,11 @@ fn normalize_provider_decision(structured: Option<Value>, response: &str) -> Val
 
     structured
         .and_then(normalize)
-        .or_else(|| serde_json::from_str::<Value>(response).ok().and_then(normalize))
+        .or_else(|| {
+            serde_json::from_str::<Value>(response)
+                .ok()
+                .and_then(normalize)
+        })
         .unwrap_or_else(|| {
             json!({
                 "kind":"message",
