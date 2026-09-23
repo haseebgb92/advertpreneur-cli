@@ -525,13 +525,17 @@ fn decision_sse(decision: Value, usage: Option<&AntigravityResponse>) -> Respons
                 .get("name")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
+            let namespace = decision
+                .get("namespace")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
             let arguments = decision
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
             let call_id = format!("call_{}", Uuid::new_v4().simple());
 
-            if name == "tool_search" {
+            if name == "tool_search" && namespace.is_empty() {
                 events.push(json!({
                     "type":"response.output_item.done",
                     "item":{
@@ -543,17 +547,49 @@ fn decision_sse(decision: Value, usage: Option<&AntigravityResponse>) -> Respons
                     }
                 }));
             } else {
+                let mut item = json!({
+                    "type":"function_call",
+                    "id": item_id,
+                    "call_id": call_id,
+                    "name": name,
+                    "arguments": serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string())
+                });
+                if !namespace.is_empty() {
+                    item["namespace"] = Value::String(namespace.to_string());
+                }
                 events.push(json!({
                     "type":"response.output_item.done",
-                    "item":{
-                        "type":"function_call",
-                        "id": item_id,
-                        "call_id": call_id,
-                        "name": name,
-                        "arguments": serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string())
-                    }
+                    "item": item
                 }));
             }
+        }
+        Some("custom_tool_call") => {
+            let name = decision
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let namespace = decision
+                .get("namespace")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let input = decision
+                .get("input")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let mut item = json!({
+                "type":"custom_tool_call",
+                "id": item_id,
+                "call_id": format!("call_{}", Uuid::new_v4().simple()),
+                "name": name,
+                "input": input
+            });
+            if !namespace.is_empty() {
+                item["namespace"] = Value::String(namespace.to_string());
+            }
+            events.push(json!({
+                "type":"response.output_item.done",
+                "item": item
+            }));
         }
         _ => {
             let text = decision
@@ -609,8 +645,8 @@ fn provider_decision_prompt(request: &Value, provider: &str) -> String {
     format!(
         "You are the {provider} reasoning backend for Codex Unchained. Do not execute your own shell, browser, web, file, or other tools. \
 Only reason over the supplied conversation and choose either a final assistant message or exactly \
-one host tool call. Host tools are executed by Codex Unchained, not by this backend. If a tool is needed, use its exact \
-name and valid JSON arguments. If the host tool is named tool_search, select it normally as a function_call; the Unchained adapter will emit Codex's native tool_search_call event. If no tool is needed, return a message.\n\nSYSTEM INSTRUCTIONS:\n{instructions}\n\nCONVERSATION ITEMS JSON:\n{input}\n\nAVAILABLE HOST TOOLS JSON:\n{tools}"
+one host tool call. Host tools are executed by Codex Unchained, not by this backend. If a tool is needed, preserve its exact \
+wire identity. For a normal function tool, return kind=function_call with its exact name and JSON arguments. If the tool is nested under a host tool with type=namespace, return the parent namespace name in namespace and the selected child name in name. If the child type is custom, return kind=custom_tool_call and put its freeform payload in input. If the host tool is named tool_search, return kind=function_call with name=tool_search and its query arguments; the Unchained adapter will emit Codex's native tool_search_call event. If no tool is needed, return a message.\n\nSYSTEM INSTRUCTIONS:\n{instructions}\n\nCONVERSATION ITEMS JSON:\n{input}\n\nAVAILABLE HOST TOOLS JSON:\n{tools}"
     )
 }
 
@@ -618,12 +654,14 @@ fn decision_schema() -> Value {
     json!({
         "type":"object",
         "properties":{
-            "kind":{"type":"string","enum":["message","function_call"]},
+            "kind":{"type":"string","enum":["message","function_call","custom_tool_call"]},
             "text":{"type":"string"},
             "name":{"type":"string"},
-            "arguments":{"type":"object"}
+            "namespace":{"type":"string"},
+            "arguments":{"type":"object"},
+            "input":{"type":"string"}
         },
-        "required":["kind","text","name","arguments"],
+        "required":["kind","text","name","namespace","arguments","input"],
         "additionalProperties":false
     })
 }
@@ -684,6 +722,9 @@ mod tests {
         let schema = decision_schema();
         assert_eq!(schema["properties"]["kind"]["enum"][0], "message");
         assert_eq!(schema["properties"]["kind"]["enum"][1], "function_call");
+        assert_eq!(schema["properties"]["kind"]["enum"][2], "custom_tool_call");
+        assert!(schema["properties"].get("namespace").is_some());
+        assert!(schema["properties"].get("input").is_some());
     }
 
     #[test]
@@ -692,7 +733,9 @@ mod tests {
             "kind":"function_call",
             "text":"",
             "name":"tool_search",
-            "arguments":{"query":"browser","limit":8}
+            "namespace":"",
+            "arguments":{"query":"browser","limit":8},
+            "input":""
         });
         let response = decision_sse(decision, None);
         let body = response.into_body();
@@ -703,6 +746,46 @@ mod tests {
         assert!(text.contains("\"execution\":\"client\""));
         assert!(text.contains("\"query\":\"browser\""));
         assert!(!text.contains("\"type\":\"function_call\",\"id\""));
+    }
+
+    #[test]
+    fn namespaced_function_decision_preserves_namespace() {
+        let decision = json!({
+            "kind":"function_call",
+            "text":"",
+            "name":"adp_browser_navigate",
+            "namespace":"mcp__adp",
+            "arguments":{"url":"https://www.amazon.com"},
+            "input":""
+        });
+        let response = decision_sse(decision, None);
+        let body = response.into_body();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let bytes = rt.block_on(axum::body::to_bytes(body, usize::MAX)).unwrap();
+        let text = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(text.contains("\"type\":\"function_call\""));
+        assert!(text.contains("\"namespace\":\"mcp__adp\""));
+        assert!(text.contains("\"name\":\"adp_browser_navigate\""));
+    }
+
+    #[test]
+    fn custom_tool_decision_uses_custom_tool_wire_item() {
+        let decision = json!({
+            "kind":"custom_tool_call",
+            "text":"",
+            "name":"apply_patch",
+            "namespace":"functions",
+            "arguments":{},
+            "input":"*** Begin Patch\n*** End Patch"
+        });
+        let response = decision_sse(decision, None);
+        let body = response.into_body();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let bytes = rt.block_on(axum::body::to_bytes(body, usize::MAX)).unwrap();
+        let text = String::from_utf8(bytes.to_vec()).unwrap();
+        assert!(text.contains("\"type\":\"custom_tool_call\""));
+        assert!(text.contains("\"namespace\":\"functions\""));
+        assert!(text.contains("*** Begin Patch"));
     }
 
     #[test]
