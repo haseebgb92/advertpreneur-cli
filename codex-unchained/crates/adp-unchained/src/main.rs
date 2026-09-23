@@ -2,7 +2,7 @@ use adp_agent::{AgentRuntime, BROWSER_CLICK, BROWSER_FILL, BROWSER_INSPECT, Tool
 use adp_browser_broker::{BrokerState, serve};
 use adp_executor::{ReplayOutcome, WorkflowExecutor, verify_repair_candidate};
 use adp_memory::{ProjectMemory, SemanticTarget, TEACH_KEYWORD, WorkflowRepair, WorkflowStep};
-use adp_model::{AntigravityClient, OllamaClient, OllamaConfig, OllamaTransport};
+use adp_model::{AntigravityClient, OfficialCodexClient, OllamaClient, OllamaConfig, OllamaTransport};
 use adp_protocol::ExecutionContext;
 use adp_teach::{TeachConfig, TeachRecordOutcome, TeachRecorder};
 use adp_web::{WebClient, WebConfig};
@@ -56,6 +56,7 @@ enum ProviderArg {
 enum AuthProviderArg {
     Ollama,
     Agy,
+    Codex,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -265,6 +266,46 @@ async fn auth_provider(args: AuthArgs) -> Result<(), Box<dyn Error>> {
                 println!("  {} ({})", model.label, model.slug);
             }
         }
+        (AuthProviderArg::Codex, AuthMethodArg::Login) => {
+            let client = OfficialCodexClient::new();
+            if client.is_chatgpt_authenticated()? {
+                let models = client.list_models()?;
+                println!(
+                    "Official Codex is authenticated with ChatGPT. Visible models: {}",
+                    models.len()
+                );
+                for model in models.iter().take(20) {
+                    println!("  {} ({})", model.label, model.slug);
+                }
+                return Ok(());
+            }
+
+            println!("Launching the official Codex ChatGPT sign-in flow...");
+            let status = ProcessCommand::new(
+                std::env::var("ADP_CODEX_BIN").unwrap_or_else(|_| "codex".to_string()),
+            )
+            .arg("login")
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()?;
+            if !status.success() {
+                return Err(format!("codex login exited with status {status}").into());
+            }
+
+            let models = client.list_models()?;
+            println!(
+                "ChatGPT sign-in completed. Visible Codex models: {}",
+                models.len()
+            );
+            for model in models.iter().take(20) {
+                println!("  {} ({})", model.label, model.slug);
+            }
+        }
+        (AuthProviderArg::Codex, AuthMethodArg::Api) => {
+            return Err("Codex Unchained uses the official ChatGPT login for this provider; API-key auth is intentionally not enabled here.".into());
+        }
+
         (AuthProviderArg::Agy, AuthMethodArg::Api) => {
             return Err(
                 "Antigravity CLI individual-account access uses the official Google Sign-In session, not an API-key login. Use --method login for AGY."

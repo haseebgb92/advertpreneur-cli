@@ -3,7 +3,9 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::env;
+use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use thiserror::Error;
 use uuid::Uuid;
@@ -154,6 +156,214 @@ pub enum ModelError {
         status: String,
         stderr: String,
     },
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodexAccountModel {
+    pub slug: String,
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OfficialCodexClient {
+    program: String,
+    codex_home: Option<PathBuf>,
+}
+
+impl Default for OfficialCodexClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OfficialCodexClient {
+    pub fn new() -> Self {
+        Self {
+            program: env::var("ADP_CODEX_BIN").unwrap_or_else(|_| "codex".to_string()),
+            codex_home: official_codex_home(),
+        }
+    }
+
+    pub fn with_program(program: impl Into<String>) -> Self {
+        Self {
+            program: program.into(),
+            codex_home: official_codex_home(),
+        }
+    }
+
+    fn command(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        if let Some(home) = &self.codex_home {
+            command.env("CODEX_HOME", home);
+        }
+        command
+    }
+
+    pub fn is_chatgpt_authenticated(&self) -> Result<bool, ModelError> {
+        let output = self
+            .command()
+            .args(["login", "status"])
+            .output()
+            .map_err(|source| ModelError::CommandStart {
+                program: self.program.clone(),
+                source,
+            })?;
+        let combined = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(output.status.success() && combined.contains("Logged in using ChatGPT"))
+    }
+
+    pub fn list_models(&self) -> Result<Vec<CodexAccountModel>, ModelError> {
+        if !self.is_chatgpt_authenticated()? {
+            return Err(ModelError::InvalidPayload(
+                "official Codex is not authenticated with ChatGPT; run 'codex login' or 'adp-unchained auth codex'".to_string(),
+            ));
+        }
+
+        let output = self
+            .command()
+            .args(["-c", r#"model_provider="openai""#, "debug", "models"])
+            .output()
+            .map_err(|source| ModelError::CommandStart {
+                program: self.program.clone(),
+                source,
+            })?;
+        if !output.status.success() {
+            return Err(ModelError::CommandFailed {
+                program: self.program.clone(),
+                status: output.status.to_string(),
+                stderr: truncate(&String::from_utf8_lossy(&output.stderr), 4_000),
+            });
+        }
+
+        parse_codex_models(&String::from_utf8_lossy(&output.stdout))
+    }
+
+    pub fn chat_structured(
+        &self,
+        model: &str,
+        prompt: &str,
+        schema: &Value,
+    ) -> Result<Value, ModelError> {
+        let temp_root = env::temp_dir().join(format!("adp-codex-{}", Uuid::new_v4().simple()));
+        fs::create_dir_all(&temp_root)
+            .map_err(|err| ModelError::InvalidPayload(format!("could not create Codex adapter temp directory: {err}")))?;
+        let schema_path = temp_root.join("decision-schema.json");
+        let output_path = temp_root.join("decision.json");
+        let schema_bytes = serde_json::to_vec(schema)
+            .map_err(|err| ModelError::InvalidPayload(err.to_string()))?;
+        fs::write(&schema_path, schema_bytes)
+            .map_err(|err| ModelError::InvalidPayload(format!("could not write Codex decision schema: {err}")))?;
+
+        let mut command = self.command();
+        command
+            .arg("-c")
+            .arg(r#"model_provider="openai""#)
+            .arg("exec")
+            .arg("--ignore-user-config")
+            .arg("--skip-git-repo-check")
+            .arg("--ephemeral")
+            .arg("--model")
+            .arg(model)
+            .arg("--sandbox")
+            .arg("read-only")
+            .arg("--output-schema")
+            .arg(&schema_path)
+            .arg("--output-last-message")
+            .arg(&output_path)
+            .arg("-")
+            .current_dir(&temp_root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+
+        let mut child = command.spawn().map_err(|source| ModelError::CommandStart {
+            program: self.program.clone(),
+            source,
+        })?;
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(prompt.as_bytes())
+                .map_err(|source| ModelError::CommandStart {
+                    program: self.program.clone(),
+                    source,
+                })?;
+        }
+
+        let output = child
+            .wait_with_output()
+            .map_err(|source| ModelError::CommandStart {
+                program: self.program.clone(),
+                source,
+            })?;
+
+        if !output.status.success() {
+            let stderr = truncate(&String::from_utf8_lossy(&output.stderr), 6_000);
+            let _ = fs::remove_dir_all(&temp_root);
+            return Err(ModelError::CommandFailed {
+                program: self.program.clone(),
+                status: output.status.to_string(),
+                stderr,
+            });
+        }
+
+        let body = fs::read_to_string(&output_path).map_err(|err| {
+            ModelError::InvalidPayload(format!("Codex produced no structured decision: {err}"))
+        });
+        let _ = fs::remove_dir_all(&temp_root);
+        let body = body?;
+        serde_json::from_str::<Value>(&body)
+            .map_err(|err| ModelError::InvalidPayload(format!("Codex decision was not valid JSON: {err}")))
+    }
+}
+
+fn official_codex_home() -> Option<PathBuf> {
+    if let Ok(value) = env::var("ADP_OFFICIAL_CODEX_HOME")
+        && !value.trim().is_empty()
+    {
+        return Some(PathBuf::from(value));
+    }
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))
+        .map(|home| home.join(".codex"))
+}
+
+pub fn parse_codex_models(output: &str) -> Result<Vec<CodexAccountModel>, ModelError> {
+    let payload: Value = serde_json::from_str(output)
+        .map_err(|err| ModelError::InvalidPayload(format!("Codex model catalog was not valid JSON: {err}")))?;
+    let entries = payload
+        .get("models")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ModelError::InvalidPayload("Codex model catalog has no 'models' array".to_string()))?;
+
+    let mut models = entries
+        .iter()
+        .filter(|entry| entry.get("visibility").and_then(Value::as_str) == Some("list"))
+        .filter_map(|entry| {
+            let slug = entry.get("slug").and_then(Value::as_str)?;
+            let label = entry
+                .get("display_name")
+                .and_then(Value::as_str)
+                .unwrap_or(slug);
+            Some(CodexAccountModel {
+                slug: slug.to_string(),
+                label: label.to_string(),
+                description: entry
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            })
+        })
+        .collect::<Vec<_>>();
+    models.dedup_by(|a, b| a.slug == b.slug);
+    Ok(models)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -687,6 +897,20 @@ mod tests {
         let models = parse_antigravity_models("Available models:\n\nslug-one Model One\n");
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].slug, "slug-one");
+    }
+
+    #[test]
+    fn codex_catalog_parser_keeps_only_picker_visible_models() {
+        let models = parse_codex_models(
+            r#"{"models":[
+                {"slug":"gpt-a","display_name":"GPT A","description":"A","visibility":"list"},
+                {"slug":"gpt-hidden","display_name":"GPT Hidden","visibility":"hide"}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].slug, "gpt-a");
+        assert_eq!(models[0].label, "GPT A");
     }
 
     #[test]

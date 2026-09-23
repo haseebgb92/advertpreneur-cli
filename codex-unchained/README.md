@@ -31,6 +31,7 @@ Automatic ADP modes intentionally do not consume an Antigravity account silently
 - live Ollama Local and Ollama Cloud discovery;
 - official Ollama sign-in plus direct `OLLAMA_API_KEY` support;
 - official Antigravity/`agy` session detection and model discovery;
+- official Codex ChatGPT-session model discovery and OpenAI reasoning backend without an API key;
 - dedicated `~/.codex-unchained` state, separate from normal Codex;
 - ADP-owned Chrome/Edge browser broker and extension;
 - host-owned Web search/fetch;
@@ -84,6 +85,7 @@ The live model catalog includes:
 [ADP] Max
 [Ollama Local] ...
 [Ollama Cloud] ...
+[OpenAI / ChatGPT] ...
 [Antigravity] ...
 ```
 
@@ -118,6 +120,16 @@ adp-unchained auth ollama --method api
 ```
 
 When `OLLAMA_API_KEY` is available, the model router can send Ollama Cloud Responses requests directly. Otherwise it uses the signed-in local Ollama daemon.
+
+### OpenAI / ChatGPT through official Codex
+
+Unchained reuses the authenticated session owned by the official `codex` CLI. It does not copy ChatGPT tokens into `~/.codex-unchained` and does not require an OpenAI API key.
+
+```bash
+adp-unchained auth codex
+```
+
+The live model catalog comes from `codex debug models`, filtered to models that the authenticated Codex account exposes in its picker. Exact OpenAI selections appear under `/model` as `[OpenAI / ChatGPT] ...`.
 
 ### Antigravity / AGY
 
@@ -183,6 +195,7 @@ After installation:
 
 ```bash
 adp-unchained auth ollama
+adp-unchained auth codex
 codex-unchained
 ```
 

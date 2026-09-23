@@ -133,6 +133,7 @@ startup_timeout_sec = 20
     Write-Host "  Ollama login:  adp-unchained auth ollama"
     Write-Host "  Ollama API:    set OLLAMA_API_KEY, then run adp-unchained auth ollama --method api"
     Write-Host "  Antigravity:   adp-unchained auth agy"
+    Write-Host "  OpenAI/ChatGPT: adp-unchained auth codex"
     Write-Host ""
     Write-Host "Open a new terminal and run: codex-unchained"
 }

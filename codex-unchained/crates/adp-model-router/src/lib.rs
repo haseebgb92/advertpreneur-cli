@@ -2,7 +2,7 @@
 
 mod policy;
 
-use adp_model::{AntigravityClient, AntigravityResponse};
+use adp_model::{AntigravityClient, AntigravityResponse, OfficialCodexClient};
 use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
@@ -20,6 +20,7 @@ pub const MODEL_ROUTER_ADDR: &str = "127.0.0.1:8766";
 const OLLAMA_LOCAL: &str = "http://127.0.0.1:11434";
 const OLLAMA_CLOUD_CATALOG: &str = "https://ollama.com/api/tags";
 const ANTIGRAVITY_PREFIX: &str = "antigravity/";
+const OPENAI_PREFIX: &str = "openai/";
 const OLLAMA_LOCAL_PREFIX: &str = "ollama-local/";
 const OLLAMA_CLOUD_PREFIX: &str = "ollama-cloud/";
 
@@ -27,6 +28,7 @@ const OLLAMA_CLOUD_PREFIX: &str = "ollama-cloud/";
 pub struct ModelRouterState {
     http: Client,
     antigravity: Arc<AntigravityClient>,
+    codex: Arc<OfficialCodexClient>,
 }
 
 impl ModelRouterState {
@@ -34,6 +36,7 @@ impl ModelRouterState {
         Ok(Self {
             http: Client::builder().build()?,
             antigravity: Arc::new(AntigravityClient::new()),
+            codex: Arc::new(OfficialCodexClient::new()),
         })
     }
 }
@@ -69,8 +72,12 @@ async fn build_catalog(state: &ModelRouterState) -> Result<Vec<Value>, String> {
         let client = state.antigravity.clone();
         tokio::task::spawn_blocking(move || client.list_models())
     };
+    let codex = {
+        let client = state.codex.clone();
+        tokio::task::spawn_blocking(move || client.list_models())
+    };
 
-    let (local, cloud, agy) = tokio::join!(local, cloud, agy);
+    let (local, cloud, agy, codex) = tokio::join!(local, cloud, agy, codex);
     let mut models = Vec::new();
 
     for (index, (slug, label, description)) in [
@@ -125,6 +132,27 @@ async fn build_catalog(state: &ModelRouterState) -> Result<Vec<Value>, String> {
                 "Runs on Ollama Cloud through the signed-in local Ollama daemon.",
                 1_000 + index as i32,
             ));
+        }
+    }
+
+    match codex {
+        Ok(Ok(names)) => {
+            for (index, model) in names.into_iter().enumerate() {
+                models.push(model_info(
+                    format!("{OPENAI_PREFIX}{}", model.slug),
+                    format!("[OpenAI / ChatGPT] {}", model.label),
+                    model.description.as_deref().unwrap_or(
+                        "Uses the official Codex CLI ChatGPT session as the reasoning backend.",
+                    ),
+                    1_500 + index as i32,
+                ));
+            }
+        }
+        Ok(Err(error)) => {
+            eprintln!("ADP OpenAI/ChatGPT model discovery unavailable: {error}");
+        }
+        Err(error) => {
+            eprintln!("ADP OpenAI/ChatGPT discovery worker failed: {error}");
         }
     }
 
@@ -253,6 +281,10 @@ async fn responses(
 
     if let Some(actual) = model.strip_prefix(OLLAMA_CLOUD_PREFIX) {
         return proxy_ollama_cloud(&state.http, actual, request).await;
+    }
+
+    if let Some(actual) = model.strip_prefix(OPENAI_PREFIX) {
+        return codex_response(state.codex.clone(), actual.to_string(), request).await;
     }
 
     if let Some(actual) = model.strip_prefix(ANTIGRAVITY_PREFIX) {
@@ -415,12 +447,35 @@ async fn ensure_ollama_model(http: &Client, model: &str) -> Result<(), String> {
     Ok(())
 }
 
+async fn codex_response(
+    client: Arc<OfficialCodexClient>,
+    model: String,
+    request: Value,
+) -> Response<Body> {
+    let prompt = provider_decision_prompt(&request, "official Codex/OpenAI");
+    let schema = decision_schema();
+    let result = tokio::task::spawn_blocking(move || client.chat_structured(&model, &prompt, &schema))
+        .await;
+
+    let decision = match result {
+        Ok(Ok(decision)) => decision,
+        Ok(Err(error)) => {
+            return sse_error(format!("OpenAI/ChatGPT request failed: {error}"));
+        }
+        Err(error) => {
+            return sse_error(format!("OpenAI/ChatGPT worker failed: {error}"));
+        }
+    };
+
+    decision_sse(decision, None)
+}
+
 async fn antigravity_response(
     client: Arc<AntigravityClient>,
     model: String,
     request: Value,
 ) -> Response<Body> {
-    let prompt = antigravity_prompt(&request);
+    let prompt = provider_decision_prompt(&request, "Antigravity");
     let schema = decision_schema();
     let result = tokio::task::spawn_blocking(move || {
         client.chat_structured(&model, &prompt, &schema, "adp-unchained-brain")
@@ -453,6 +508,10 @@ async fn antigravity_response(
             || json!({"kind":"message","text":response.response,"name":"","arguments":{}}),
         );
 
+    decision_sse(decision, Some(&response))
+}
+
+fn decision_sse(decision: Value, usage: Option<&AntigravityResponse>) -> Response<Body> {
     let id = format!("resp_{}", Uuid::new_v4().simple());
     let item_id = format!("item_{}", Uuid::new_v4().simple());
     let mut events = vec![json!({
@@ -485,7 +544,7 @@ async fn antigravity_response(
             let text = decision
                 .get("text")
                 .and_then(Value::as_str)
-                .unwrap_or(&response.response);
+                .unwrap_or_default();
             events.push(json!({
                 "type":"response.output_item.done",
                 "item":{
@@ -498,11 +557,27 @@ async fn antigravity_response(
         }
     }
 
-    events.push(completed_event(&id, &response));
+    let usage = usage.map(|response| json!({
+        "input_tokens": response.usage.input_tokens,
+        "input_tokens_details":{"cached_tokens":response.usage.cache_read_tokens},
+        "output_tokens": response.usage.output_tokens,
+        "output_tokens_details":{"reasoning_tokens":response.usage.thinking_tokens},
+        "total_tokens": response.usage.total_tokens
+    })).unwrap_or_else(|| json!({
+        "input_tokens": 0,
+        "input_tokens_details":{"cached_tokens":0},
+        "output_tokens": 0,
+        "output_tokens_details":{"reasoning_tokens":0},
+        "total_tokens": 0
+    }));
+    events.push(json!({
+        "type":"response.completed",
+        "response":{"id":id,"usage":usage}
+    }));
     sse_response(events)
 }
 
-fn antigravity_prompt(request: &Value) -> String {
+fn provider_decision_prompt(request: &Value, provider: &str) -> String {
     let instructions = request
         .get("instructions")
         .and_then(Value::as_str)
@@ -511,9 +586,9 @@ fn antigravity_prompt(request: &Value) -> String {
     let tools = request.get("tools").cloned().unwrap_or_else(|| json!([]));
 
     format!(
-        "You are the reasoning backend for Codex Unchained. Do not use Antigravity's own tools. \
+        "You are the {provider} reasoning backend for Codex Unchained. Do not execute your own shell, browser, web, file, or other tools. \
 Only reason over the supplied conversation and choose either a final assistant message or exactly \
-one host tool call. Host tools are executed by Codex, not by you. If a tool is needed, use its exact \
+one host tool call. Host tools are executed by Codex Unchained, not by this backend. If a tool is needed, use its exact \
 name and valid JSON arguments. If no tool is needed, return a message.\n\nSYSTEM INSTRUCTIONS:\n{instructions}\n\nCONVERSATION ITEMS JSON:\n{input}\n\nAVAILABLE HOST TOOLS JSON:\n{tools}"
     )
 }
@@ -529,22 +604,6 @@ fn decision_schema() -> Value {
         },
         "required":["kind","text","name","arguments"],
         "additionalProperties":false
-    })
-}
-
-fn completed_event(id: &str, response: &AntigravityResponse) -> Value {
-    json!({
-        "type":"response.completed",
-        "response":{
-            "id": id,
-            "usage":{
-                "input_tokens": response.usage.input_tokens,
-                "input_tokens_details":{"cached_tokens":response.usage.cache_read_tokens},
-                "output_tokens": response.usage.output_tokens,
-                "output_tokens_details":{"reasoning_tokens":response.usage.thinking_tokens},
-                "total_tokens": response.usage.total_tokens
-            }
-        }
     })
 }
 
@@ -607,14 +666,14 @@ mod tests {
     }
 
     #[test]
-    fn prompt_contains_codex_tools_but_forbids_antigravity_tools() {
+    fn provider_prompt_contains_codex_tools_but_forbids_backend_tools() {
         let request = json!({
             "instructions":"be concise",
             "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect"}]}],
             "tools":[{"type":"function","name":"adp_browser_inspect","parameters":{"type":"object"}}]
         });
-        let prompt = antigravity_prompt(&request);
+        let prompt = provider_decision_prompt(&request, "test-provider");
         assert!(prompt.contains("adp_browser_inspect"));
-        assert!(prompt.contains("Do not use Antigravity's own tools"));
+        assert!(prompt.contains("Do not execute your own shell"));
     }
 }
