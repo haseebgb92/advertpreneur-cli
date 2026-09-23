@@ -110,6 +110,46 @@ def main() -> None:
                 }));""",
         "ADP catalog authoritative merge policy",
     )
+    manager_text = replace_once(
+        manager_text,
+        """    let model_info = if let Some(remote) = remote {
+        ModelInfo {
+            slug: model.to_string(),
+            used_fallback_model_metadata: false,
+            ..remote
+        }
+    } else {
+        model_info::model_info_from_slug(model)
+    };""",
+        """    let model_info = if let Some(remote) = remote {
+        ModelInfo {
+            slug: model.to_string(),
+            used_fallback_model_metadata: false,
+            ..remote
+        }
+    } else if model.starts_with("adp/")
+        || model.starts_with("antigravity/")
+        || model.starts_with("openai/")
+        || model.starts_with("ollama-local/")
+        || model.starts_with("ollama-cloud/")
+    {
+        let mut info = model_info::model_info_from_slug(model);
+        // These namespaces are owned by Codex Unchained. A router startup race must
+        // not downgrade them to unknown-model behavior.
+        info.display_name = model.to_string();
+        info.visibility = ModelVisibility::List;
+        info.used_fallback_model_metadata = false;
+        info.supports_search_tool = false;
+        info.include_skills_usage_instructions = true;
+        info.include_plugin_usage_instructions = true;
+        info.include_apps_usage_instructions = true;
+        info
+    } else {
+        model_info::model_info_from_slug(model)
+    };""",
+        "ADP namespaced model metadata fallback",
+    )
+
     manager.write_text(manager_text, encoding="utf-8")
 
 
