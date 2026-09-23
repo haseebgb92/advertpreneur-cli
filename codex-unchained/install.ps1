@@ -103,44 +103,12 @@ base_url = "http://127.0.0.1:8766/v1"
 wire_api = "responses"
 requires_openai_auth = false
 "@
-        } 
-
-        # Remove the obsolete alpha.26 catalog key; the pinned Codex build discovers
-        # the ADP catalog from the provider base URL at /models.
-        $text = $text -replace '(?m)^model_catalog_url\s*=.*(?:\r?\n)?', ''
-
-        if ($text -notmatch '(?m)^\[mcp_servers\.adp\]
-            $text += @"
-
-[mcp_servers.adp]
-command = "$mcpPath"
-startup_timeout_sec = 20
-"@
         }
 
-        Set-Content -Path $config -Value $text -Encoding UTF8
-    }
+        # alpha.26 wrote this obsolete key; remove it during upgrade.
+        $text = $text -replace '(?m)^model_catalog_url\s*=.*(?:\r?\n)?', ''
 
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    $parts = @($userPath -split ';' | Where-Object { $_ })
-    if ($parts -notcontains $installDir) {
-        [Environment]::SetEnvironmentVariable("Path", (($parts + $installDir) -join ";"), "User")
-    }
-
-    Write-Host "Codex Unchained installed."
-    Write-Host "Default routing: /adp auto"
-    Write-Host ""
-    Write-Host "Provider setup:"
-    Write-Host "  Ollama login:  adp-unchained auth ollama"
-    Write-Host "  Ollama API:    set OLLAMA_API_KEY, then run adp-unchained auth ollama --method api"
-    Write-Host "  Antigravity:   adp-unchained auth agy"
-    Write-Host ""
-    Write-Host "Open a new terminal and run: codex-unchained"
-}
-finally {
-    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-}
-) {
+        if ($text -notmatch '(?m)^\[mcp_servers\.adp\]$') {
             $text += @"
 
 [mcp_servers.adp]
