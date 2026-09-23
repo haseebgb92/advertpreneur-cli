@@ -243,7 +243,7 @@ fn model_info(slug: String, display_name: String, description: &str, priority: i
         "comp_hash": null,
         "effective_context_window_percent": 90,
         "experimental_supported_tools": [],
-        "supports_search_tool": true,
+        "supports_search_tool": false,
         "supports_experimental_context": false,
         "use_responses_lite": false,
         "node_repl_auto_review_required": false,
@@ -500,15 +500,80 @@ async fn antigravity_response(
         );
     }
 
-    let decision = response
-        .structured_output
-        .clone()
-        .or_else(|| serde_json::from_str::<Value>(&response.response).ok())
-        .unwrap_or_else(
-            || json!({"kind":"message","text":response.response,"name":"","arguments":{}}),
-        );
+    let decision = normalize_provider_decision(
+        response.structured_output.clone(),
+        &response.response,
+    );
 
     decision_sse(decision, Some(&response))
+}
+
+fn normalize_provider_decision(structured: Option<Value>, response: &str) -> Value {
+    fn normalize(value: Value) -> Option<Value> {
+        match value {
+            Value::Object(mut object) => {
+                let is_tool = object
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| matches!(kind, "function_call" | "custom_tool_call"))
+                    || object
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| !name.trim().is_empty());
+                if is_tool {
+                    object
+                        .entry("kind")
+                        .or_insert_with(|| Value::String("function_call".to_string()));
+                    object.entry("text").or_insert_with(|| Value::String(String::new()));
+                    object.entry("namespace").or_insert_with(|| Value::String(String::new()));
+                    object.entry("arguments").or_insert_with(|| json!({}));
+                    object.entry("input").or_insert_with(|| Value::String(String::new()));
+                    return Some(Value::Object(object));
+                }
+
+                if object.get("kind").and_then(Value::as_str) == Some("message") {
+                    if let Some(text) = object.get("text").and_then(Value::as_str)
+                        && let Ok(nested) = serde_json::from_str::<Value>(text)
+                        && let Some(normalized) = normalize(nested)
+                    {
+                        return Some(normalized);
+                    }
+                    object.entry("name").or_insert_with(|| Value::String(String::new()));
+                    object.entry("namespace").or_insert_with(|| Value::String(String::new()));
+                    object.entry("arguments").or_insert_with(|| json!({}));
+                    object.entry("input").or_insert_with(|| Value::String(String::new()));
+                    return Some(Value::Object(object));
+                }
+
+                for key in ["structured_output", "decision", "output", "result"] {
+                    if let Some(child) = object.remove(key)
+                        && let Some(normalized) = normalize(child)
+                    {
+                        return Some(normalized);
+                    }
+                }
+                None
+            }
+            Value::String(text) => serde_json::from_str::<Value>(&text)
+                .ok()
+                .and_then(normalize),
+            _ => None,
+        }
+    }
+
+    structured
+        .and_then(normalize)
+        .or_else(|| serde_json::from_str::<Value>(response).ok().and_then(normalize))
+        .unwrap_or_else(|| {
+            json!({
+                "kind":"message",
+                "text":response,
+                "name":"",
+                "namespace":"",
+                "arguments":{},
+                "input":""
+            })
+        })
 }
 
 fn decision_sse(decision: Value, usage: Option<&AntigravityResponse>) -> Response<Body> {
@@ -646,7 +711,7 @@ fn provider_decision_prompt(request: &Value, provider: &str) -> String {
         "You are the {provider} reasoning backend for Codex Unchained. Do not execute your own shell, browser, web, file, or other tools. \
 Only reason over the supplied conversation and choose either a final assistant message or exactly \
 one host tool call. Host tools are executed by Codex Unchained, not by this backend. If a tool is needed, preserve its exact \
-wire identity. For a normal function tool, return kind=function_call with its exact name and JSON arguments. If the tool is nested under a host tool with type=namespace, return the parent namespace name in namespace and the selected child name in name. If the child type is custom, return kind=custom_tool_call and put its freeform payload in input. If the host tool is named tool_search, return kind=function_call with name=tool_search and its query arguments; the Unchained adapter will emit Codex's native tool_search_call event. If no tool is needed, return a message.\n\nSYSTEM INSTRUCTIONS:\n{instructions}\n\nCONVERSATION ITEMS JSON:\n{input}\n\nAVAILABLE HOST TOOLS JSON:\n{tools}"
+wire identity. For a normal function tool, return kind=function_call with its exact name and JSON arguments. If the tool is nested under a host tool with type=namespace, return the parent namespace name in namespace and the selected child name in name. If the child type is custom, return kind=custom_tool_call and put its freeform payload in input. Do not describe a tool call as prose and do not place a JSON tool decision inside the text field. Prefer the concrete browser, web, shell, file, MCP, or other host tool already present in AVAILABLE HOST TOOLS JSON. Use tool_search only when it is actually present and no concrete matching tool is available. If no tool is needed, return a message.\n\nSYSTEM INSTRUCTIONS:\n{instructions}\n\nCONVERSATION ITEMS JSON:\n{input}\n\nAVAILABLE HOST TOOLS JSON:\n{tools}"
     )
 }
 
@@ -725,6 +790,35 @@ mod tests {
         assert_eq!(schema["properties"]["kind"]["enum"][2], "custom_tool_call");
         assert!(schema["properties"].get("namespace").is_some());
         assert!(schema["properties"].get("input").is_some());
+    }
+
+    #[test]
+    fn loose_antigravity_tool_decision_is_normalized() {
+        let decision = normalize_provider_decision(
+            Some(json!({
+                "kind":"function_call",
+                "name":"mcp__adp__adp_browser_navigate",
+                "arguments":{"url":"https://www.amazon.com"}
+            })),
+            "",
+        );
+        assert_eq!(decision["kind"], "function_call");
+        assert_eq!(decision["namespace"], "");
+        assert_eq!(decision["input"], "");
+    }
+
+    #[test]
+    fn json_tool_decision_embedded_in_message_text_is_promoted() {
+        let decision = normalize_provider_decision(
+            Some(json!({
+                "kind":"message",
+                "text":"{\"kind\":\"function_call\",\"name\":\"exec_command\",\"arguments\":{\"cmd\":\"ls -la\"}}"
+            })),
+            "",
+        );
+        assert_eq!(decision["kind"], "function_call");
+        assert_eq!(decision["name"], "exec_command");
+        assert_eq!(decision["arguments"]["cmd"], "ls -la");
     }
 
     #[test]

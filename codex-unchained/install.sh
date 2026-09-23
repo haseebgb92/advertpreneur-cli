@@ -118,6 +118,9 @@ EOF
   fi
 fi
 
+# The live Unchained router owns model metadata. Remove stale cache on upgrade.
+rm -f "$unchained_home/models_cache.json"
+
 case ":$PATH:" in
   *":$install_dir:"*) ;;
   *) echo "Add $install_dir to PATH, or restart your shell if your profile already exports ~/.local/bin." ;;

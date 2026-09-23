@@ -120,6 +120,11 @@ startup_timeout_sec = 20
         Set-Content -Path $config -Value $text -Encoding UTF8
     }
 
+    $modelCache = Join-Path $unchainedHome "models_cache.json"
+    if (Test-Path $modelCache) {
+        Remove-Item -Force $modelCache
+    }
+
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     $parts = @($userPath -split ';' | Where-Object { $_ })
     if ($parts -notcontains $installDir) {
