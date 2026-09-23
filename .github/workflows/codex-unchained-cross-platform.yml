@@ -90,6 +90,9 @@ jobs:
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/codex-base"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            root="$(cygpath -u "$RUNNER_TEMP")/codex-base"
+          fi
           mkdir -p "$root"
           gh release download "${{ steps.codex-base.outputs.tag }}" \
             --repo "$GITHUB_REPOSITORY" \
