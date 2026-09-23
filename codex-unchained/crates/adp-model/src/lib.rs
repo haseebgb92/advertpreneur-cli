@@ -217,7 +217,7 @@ impl AntigravityClient {
 
     pub fn list_models(&self) -> Result<Vec<AntigravityModel>, ModelError> {
         let output = Command::new(&self.program)
-            .args(["models", "--output-format", "json"])
+            .arg("models")
             .output()
             .map_err(|source| ModelError::CommandStart {
                 program: self.program.clone(),

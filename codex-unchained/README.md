@@ -121,7 +121,7 @@ When `OLLAMA_API_KEY` is available, the model router can send Ollama Cloud Respo
 
 ### Antigravity / AGY
 
-Use the official `agy` Google sign-in/session:
+Use the official `agy` Google sign-in/session. Unchained discovers the models exposed by that session with the same `agy models` command available in the CLI:
 
 ```bash
 adp-unchained auth agy

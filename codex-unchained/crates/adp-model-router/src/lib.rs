@@ -128,14 +128,22 @@ async fn build_catalog(state: &ModelRouterState) -> Result<Vec<Value>, String> {
         }
     }
 
-    if let Ok(Ok(names)) = agy {
-        for (index, model) in names.into_iter().enumerate() {
-            models.push(model_info(
-                format!("{ANTIGRAVITY_PREFIX}{}", model.slug),
-                format!("[Antigravity] {}", model.label),
-                "Uses the existing authenticated Antigravity CLI session as the reasoning backend.",
-                2_000 + index as i32,
-            ));
+    match agy {
+        Ok(Ok(names)) => {
+            for (index, model) in names.into_iter().enumerate() {
+                models.push(model_info(
+                    format!("{ANTIGRAVITY_PREFIX}{}", model.slug),
+                    format!("[Antigravity] {}", model.label),
+                    "Uses the existing authenticated Antigravity CLI session as the reasoning backend.",
+                    2_000 + index as i32,
+                ));
+            }
+        }
+        Ok(Err(error)) => {
+            eprintln!("ADP Antigravity model discovery failed: {error}");
+        }
+        Err(error) => {
+            eprintln!("ADP Antigravity model discovery worker failed: {error}");
         }
     }
 
