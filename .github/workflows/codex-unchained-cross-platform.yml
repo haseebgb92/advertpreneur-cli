@@ -60,6 +60,45 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Detect reusable patched Codex base
+        id: codex-base
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=20" --jq '[.[] | select(.draft == false and (.tag_name | startswith("codex-unchained-v")))] | .[0].tag_name // ""')"
+          reuse=false
+          if [ -n "$base_tag" ]; then
+            git fetch --no-tags --depth=1 origin "refs/tags/$base_tag:refs/tags/$base_tag"
+            if git diff --quiet "$base_tag" HEAD -- codex-unchained/upstream-patches; then
+              reuse=true
+            fi
+          fi
+          echo "tag=$base_tag" >> "$GITHUB_OUTPUT"
+          echo "reuse=$reuse" >> "$GITHUB_OUTPUT"
+          echo "Reusable patched Codex base: $reuse ${base_tag:+($base_tag)}"
+
+      - name: Download reusable patched Codex package
+        if: steps.codex-base.outputs.reuse == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/codex-base"
+          mkdir -p "$root"
+          gh release download "${{ steps.codex-base.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "${{ matrix.artifact }}.tar.gz" \
+            --dir "$root"
+          tar -xzf "$root/${{ matrix.artifact }}.tar.gz" -C "$root"
+          test -f "$root/${{ matrix.artifact }}/codex-unchained${{ matrix.ext }}"
+          test "$(tr -d '\r\n' < "$root/${{ matrix.artifact }}/UPSTREAM_SHA")" = "$(tr -d '\r\n' < codex-unchained/upstream-patches/UPSTREAM_SHA)"
+          echo "CODEX_BASE_ROOT=$root/${{ matrix.artifact }}" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -78,6 +117,7 @@ jobs:
           $null = [scriptblock]::Create($source)
 
       - name: Fetch pinned upstream Codex
+        if: steps.codex-base.outputs.reuse != 'true'
         shell: bash
         run: |
           sha="$(tr -d '\r\n' < codex-unchained/upstream-patches/UPSTREAM_SHA)"
@@ -90,6 +130,7 @@ jobs:
           echo "CODEX_UPSTREAM_ROOT=$root" >> "$GITHUB_ENV"
 
       - name: Apply Unchained patches
+        if: steps.codex-base.outputs.reuse != 'true'
         shell: bash
         run: |
           python3 codex-unchained/upstream-patches/apply_0001.py "$CODEX_UPSTREAM_ROOT"
@@ -100,6 +141,7 @@ jobs:
           git -C "$CODEX_UPSTREAM_ROOT" diff --check
 
       - name: Raise codex-chatgpt recursion limit
+        if: steps.codex-base.outputs.reuse != 'true'
         shell: bash
         run: |
           python - <<'PY'
@@ -113,6 +155,7 @@ jobs:
           PY
 
       - name: Build patched Codex
+        if: steps.codex-base.outputs.reuse != 'true'
         shell: bash
         run: cargo build --manifest-path "$CODEX_UPSTREAM_ROOT/codex-rs/Cargo.toml" -p codex-cli --release --target ${{ matrix.target }}
 
@@ -121,7 +164,7 @@ jobs:
         run: cargo build --manifest-path codex-unchained/Cargo.toml -p adp-unchained -p adp-mcp --release --target ${{ matrix.target }}
 
       - name: Build Windows sandbox helpers
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.codex-base.outputs.reuse != 'true'
         shell: bash
         run: |
           cargo build --manifest-path "$CODEX_UPSTREAM_ROOT/codex-rs/Cargo.toml" -p codex-windows-sandbox --bin codex-windows-sandbox-setup --bin codex-command-runner --release --target ${{ matrix.target }}
@@ -132,7 +175,11 @@ jobs:
         run: |
           dist="codex-unchained/dist/${{ matrix.artifact }}"
           mkdir -p "$dist"
-          cp "$CODEX_UPSTREAM_ROOT/codex-rs/target/${{ matrix.target }}/release/codex${{ matrix.ext }}" "$dist/codex-unchained${{ matrix.ext }}"
+          if [ "${{ steps.codex-base.outputs.reuse }}" = "true" ]; then
+            cp "$CODEX_BASE_ROOT/codex-unchained${{ matrix.ext }}" "$dist/codex-unchained${{ matrix.ext }}"
+          else
+            cp "$CODEX_UPSTREAM_ROOT/codex-rs/target/${{ matrix.target }}/release/codex${{ matrix.ext }}" "$dist/codex-unchained${{ matrix.ext }}"
+          fi
           cp "codex-unchained/target/${{ matrix.target }}/release/adp-mcp${{ matrix.ext }}" "$dist/adp-mcp${{ matrix.ext }}"
           cp "codex-unchained/target/${{ matrix.target }}/release/adp-unchained${{ matrix.ext }}" "$dist/adp-unchained${{ matrix.ext }}"
           cp -R codex-unchained/extension "$dist/extension"
@@ -140,9 +187,15 @@ jobs:
           cp codex-unchained/README.md "$dist/"
           cp codex-unchained/upstream-patches/UPSTREAM_SHA "$dist/"
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "$CODEX_UPSTREAM_ROOT/codex-rs/target/${{ matrix.target }}/release/codex-windows-sandbox-setup.exe" "$dist/"
-            cp "$CODEX_UPSTREAM_ROOT/codex-rs/target/${{ matrix.target }}/release/codex-windows-sandbox-service.exe" "$dist/"
-            cp "$CODEX_UPSTREAM_ROOT/codex-rs/target/${{ matrix.target }}/release/codex-command-runner.exe" "$dist/"
+            if [ "${{ steps.codex-base.outputs.reuse }}" = "true" ]; then
+              cp "$CODEX_BASE_ROOT/codex-windows-sandbox-setup.exe" "$dist/"
+              cp "$CODEX_BASE_ROOT/codex-windows-sandbox-service.exe" "$dist/"
+              cp "$CODEX_BASE_ROOT/codex-command-runner.exe" "$dist/"
+            else
+              cp "$CODEX_UPSTREAM_ROOT/codex-rs/target/${{ matrix.target }}/release/codex-windows-sandbox-setup.exe" "$dist/"
+              cp "$CODEX_UPSTREAM_ROOT/codex-rs/target/${{ matrix.target }}/release/codex-windows-sandbox-service.exe" "$dist/"
+              cp "$CODEX_UPSTREAM_ROOT/codex-rs/target/${{ matrix.target }}/release/codex-command-runner.exe" "$dist/"
+            fi
           fi
           test -f "$dist/codex-unchained${{ matrix.ext }}"
           test -f "$dist/adp-mcp${{ matrix.ext }}"
