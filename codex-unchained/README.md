@@ -19,7 +19,7 @@ same Codex-style agent + tools
           +-- /model -> exact model pin
 ```
 
-The `/adp` modes are routing policies. They choose from currently available Ollama Local and Ollama Cloud models. `/model` is the manual override and pins an exact model/provider.
+The `/adp` modes are routing policies. They choose from currently available Ollama Local and Ollama Cloud models. `/model` is the manual override and pins an exact model/provider. The Unchained provider catalog is authoritative, so `/model` is populated from the live ADP router rather than falling back to Codex's bundled GPT-only catalog.
 
 Automatic ADP modes intentionally do not consume an Antigravity account silently. Antigravity models remain visible for explicit selection through `/model` when the user's official `agy` session is authenticated.
 

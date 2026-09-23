@@ -36,6 +36,7 @@ jobs:
           python codex-unchained/upstream-patches/apply_0002.py /tmp/codex
           python codex-unchained/upstream-patches/apply_0003.py /tmp/codex
           python codex-unchained/upstream-patches/apply_0004.py /tmp/codex
+          python codex-unchained/upstream-patches/apply_0005.py /tmp/codex
       - name: Validate patch formatting
         shell: bash
         run: |
@@ -55,7 +56,9 @@ jobs:
             codex-rs/cli/src/main.rs \
             codex-rs/tui/src/slash_command.rs \
             codex-rs/tui/src/chatwidget/slash_dispatch.rs \
-            codex-rs/tui/src/chatwidget/settings.rs
+            codex-rs/tui/src/chatwidget/settings.rs \
+            codex-rs/model-provider/src/models_endpoint.rs \
+            codex-rs/models-manager/src/manager.rs
       - name: Run focused Codex compatibility tests
         working-directory: /tmp/codex/codex-rs
         run: |
@@ -64,3 +67,5 @@ jobs:
           cargo test -p codex-models-manager unknown_model_keeps_local_tool_discovery_and_extension_instructions --lib
           cargo test -p codex-utils-home-dir find_codex_home_without_env_uses_default_home_dir --lib
           cargo test -p codex-tui adp_supports_inline_routing_modes --lib
+          grep -q "has_explicit_model_catalog" model-provider/src/models_endpoint.rs
+          grep -q "endpoint_client.has_explicit_model_catalog" models-manager/src/manager.rs
