@@ -13,12 +13,15 @@ New-Item -ItemType Directory -Force -Path $InstallRoot, $BinDir, $AgentDir | Out
 
 Write-Host "==> Installing official OpenAI Codex CLI $CodexVersion"
 $previousRelease = $env:CODEX_RELEASE
+$previousNonInteractive = $env:CODEX_NON_INTERACTIVE
 try {
     $env:CODEX_RELEASE = $CodexVersion
+    $env:CODEX_NON_INTERACTIVE = '1'
     Invoke-RestMethod https://chatgpt.com/codex/install.ps1 | Invoke-Expression
 }
 finally {
     if ($null -eq $previousRelease) { Remove-Item Env:CODEX_RELEASE -ErrorAction SilentlyContinue } else { $env:CODEX_RELEASE = $previousRelease }
+    if ($null -eq $previousNonInteractive) { Remove-Item Env:CODEX_NON_INTERACTIVE -ErrorAction SilentlyContinue } else { $env:CODEX_NON_INTERACTIVE = $previousNonInteractive }
 }
 
 Write-Host '==> Building AGY compatibility gateway'
