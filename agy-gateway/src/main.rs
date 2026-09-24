@@ -15,6 +15,7 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use uuid::Uuid;
 
@@ -169,24 +170,24 @@ async fn responses(
     .to_string();
 
     let mut cmd = Command::new(&state.agy_bin);
-    cmd.arg("-p")
-        .arg(prompt)
+    cmd.arg("--input-format")
+        .arg("stream-json")
+        .arg("--output-format")
+        .arg("stream-json")
         .arg("--model")
         .arg(&req.model)
         .arg("--agent")
         .arg(&state.agent)
-        .arg("--output-format")
-        .arg("json")
         .arg("--json-schema")
         .arg(schema)
         .arg("--print-timeout")
         .arg(&state.timeout)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let output = match cmd.output().await {
-        Ok(out) => out,
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
         Err(err) => {
             return error_response(
                 StatusCode::BAD_GATEWAY,
@@ -195,36 +196,77 @@ async fn responses(
         }
     };
 
-    if !output.status.success() {
-        return error_response(
-            StatusCode::BAD_GATEWAY,
-            format!(
-                "agy exited with {}: {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            ),
-        );
+    let user_event = json!({
+        "event": "user",
+        "message": {"content": prompt}
+    })
+    .to_string();
+
+    if let Some(mut stdin) = child.stdin.take() {
+        if let Err(err) = stdin.write_all(format!("{user_event}\n").as_bytes()).await {
+            let _ = child.kill().await;
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                format!("could not send prompt to agy: {err}"),
+            );
+        }
+        // Closing stdin after the one prompt is the documented graceful way
+        // to finish a stream-json session once the active turn completes.
+        drop(stdin);
     }
 
-    let envelope: Value = match serde_json::from_slice(&output.stdout) {
-        Ok(value) => value,
+    let output = match child.wait_with_output().await {
+        Ok(out) => out,
         Err(err) => {
             return error_response(
                 StatusCode::BAD_GATEWAY,
-                format!("invalid AGY JSON envelope: {err}"),
+                format!("could not wait for agy: {err}"),
             );
         }
     };
 
-    if envelope.get("status").and_then(Value::as_str) != Some("SUCCESS") {
-        let message = envelope
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("AGY returned a non-success status");
-        return error_response(StatusCode::BAD_GATEWAY, message.to_string());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut result = None;
+    for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(event) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if event.get("event").and_then(Value::as_str) == Some("result") {
+            result = event.get("result").cloned();
+        }
     }
 
-    let decision = match envelope.get("structured_output") {
+    let Some(result) = result else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "agy returned no result event (exit {}): {}",
+                output.status,
+                stderr.trim()
+            ),
+        );
+    };
+
+    if !output.status.success()
+        || result.get("status").and_then(Value::as_str) != Some("SUCCESS")
+    {
+        let message = result
+            .get("error")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if stderr.trim().is_empty() {
+                    format!("AGY exited with {}", output.status)
+                } else {
+                    stderr.trim().to_string()
+                }
+            });
+        return error_response(StatusCode::BAD_GATEWAY, message);
+    }
+
+    let decision = match result.get("structured_output") {
         Some(Value::Object(map)) => Value::Object(map.clone()),
         _ => {
             return error_response(
