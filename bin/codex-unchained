@@ -116,7 +116,7 @@ case "$provider" in
     set +e
     codex \
       -c 'model_provider="agy-unchained"' \
-      -c "model_providers.agy-unchained={name=\"Antigravity\",base_url=\"${GATEWAY_URL}/v1\",wire_api=\"chat\",requires_openai_auth=false}" \
+      -c "model_providers.agy-unchained={name=\"Antigravity\",base_url=\"${GATEWAY_URL}/v1\",wire_api=\"responses\",requires_openai_auth=false}" \
       -m "$model" \
       "${forward[@]}"
     status=$?
