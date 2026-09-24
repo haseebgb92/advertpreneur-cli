@@ -21,9 +21,17 @@ esac
 
 if [ "$version" = latest ]; then
   releases_json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$repo/releases?per_page=50")"
-  version="$(printf '%s' "$releases_json" | tr ',' '\n' | sed -n 's/.*"tag_name":[[:space:]]*"\(codex-unchained-v[^"]*\)".*/\1/p' | head -n 1)"
+  version=""
+  case "$os/$arch" in
+    Linux/x86_64|Linux/amd64)
+      version="$(printf '%s' "$releases_json" | tr ',' '\n' | sed -n 's/.*"tag_name":[[:space:]]*"\(codex-unchained-linux-v[^"]*\)".*/\1/p' | head -n 1)"
+      ;;
+  esac
   if [ -z "$version" ]; then
-    echo "No Codex Unchained release was found. Expected a release tag matching codex-unchained-v*." >&2
+    version="$(printf '%s' "$releases_json" | tr ',' '\n' | sed -n 's/.*"tag_name":[[:space:]]*"\(codex-unchained-v[^"]*\)".*/\1/p' | head -n 1)"
+  fi
+  if [ -z "$version" ]; then
+    echo "No compatible Codex Unchained release was found." >&2
     exit 1
   fi
 fi
@@ -37,10 +45,50 @@ tar -xzf "$tmp/package.tar.gz" -C "$tmp"
 pkg="$tmp/$asset"
 
 mkdir -p "$install_dir" "$unchained_home"
-cp "$pkg/codex-unchained" "$install_dir/codex-unchained"
+cp "$pkg/codex-unchained" "$install_dir/codex-unchained-core"
 cp "$pkg/adp-mcp" "$install_dir/adp-mcp"
 cp "$pkg/adp-unchained" "$install_dir/adp-unchained"
-chmod +x "$install_dir/codex-unchained" "$install_dir/adp-mcp" "$install_dir/adp-unchained"
+chmod +x "$install_dir/codex-unchained-core" "$install_dir/adp-mcp" "$install_dir/adp-unchained"
+
+cat > "$install_dir/codex-unchained" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+
+self_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+
+if [ "${1:-}" = "providers" ]; then
+  shift
+  case "${1:-status}" in
+    status|models)
+      exec "$self_dir/adp-unchained" providers
+      ;;
+    refresh)
+      rm -f "${CODEX_UNCHAINED_HOME:-$HOME/.codex-unchained}/models_cache.json"
+      exec "$self_dir/adp-unchained" providers
+      ;;
+    login)
+      shift
+      provider="${1:-}"
+      case "$provider" in
+        agy|ollama|codex)
+          exec "$self_dir/adp-unchained" auth "$provider"
+          ;;
+        *)
+          echo "Usage: codex-unchained providers login agy|ollama|codex" >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    *)
+      echo "Usage: codex-unchained providers [status|models|refresh|login agy|ollama|codex]" >&2
+      exit 2
+      ;;
+  esac
+fi
+
+exec "$self_dir/codex-unchained-core" "$@"
+EOF
+chmod +x "$install_dir/codex-unchained"
 
 rm -rf "$unchained_home/extension"
 cp -R "$pkg/extension" "$unchained_home/extension"
@@ -130,9 +178,10 @@ echo "Codex Unchained installed: $install_dir/codex-unchained"
 echo "Default routing: /adp auto"
 echo ""
 echo "Provider setup:"
-echo "  Ollama login:    adp-unchained auth ollama"
-echo "  Ollama API:      export OLLAMA_API_KEY=... && adp-unchained auth ollama --method api"
-echo "  Antigravity:     adp-unchained auth agy"
-echo "  OpenAI/ChatGPT:  adp-unchained auth codex"
+echo "  Status/models:   codex-unchained providers"
+echo "  Ollama login:    codex-unchained providers login ollama"
+echo "  Antigravity:     codex-unchained providers login agy"
+echo "  OpenAI/ChatGPT:  codex-unchained providers login codex"
+echo "  Refresh catalog: codex-unchained providers refresh"
 echo ""
 echo "Then run: codex-unchained"

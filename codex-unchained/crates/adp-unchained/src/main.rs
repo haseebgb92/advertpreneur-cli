@@ -34,6 +34,8 @@ enum Command {
     Models(ModelArgs),
     /// Check provider capabilities and connectivity.
     Doctor(ModelArgs),
+    /// Show live provider status and every discovered model.
+    Providers,
     /// Sign in to or validate an external model provider.
     Auth(AuthArgs),
     /// Run a model conversation with optional browser and web host tools.
@@ -174,6 +176,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Command::Broker => run_broker().await?,
         Command::Models(args) => list_models(args).await?,
         Command::Doctor(args) => doctor(args).await?,
+        Command::Providers => providers().await?,
         Command::Auth(args) => auth_provider(args).await?,
         Command::Chat(args) => chat(args).await?,
         Command::WebSearch(args) => web_search(args).await?,
@@ -190,6 +193,110 @@ async fn run_broker() -> Result<(), Box<dyn Error>> {
     let listener = bind_broker().await?;
     println!("ADP browser broker listening on http://127.0.0.1:8765");
     serve(listener, state).await?;
+    Ok(())
+}
+
+async fn providers() -> Result<(), Box<dyn Error>> {
+    println!("Codex Unchained providers");
+    println!();
+
+    let agy = tokio::task::spawn_blocking(|| AntigravityClient::new().list_models()).await;
+    match agy {
+        Ok(Ok(models)) => {
+            println!("Antigravity: connected · {} models", models.len());
+            for model in models {
+                println!("  antigravity/{}  {}", model.slug, model.label);
+            }
+        }
+        Ok(Err(error)) => {
+            println!("Antigravity: not ready · {error}");
+            println!("  Login: codex-unchained providers login agy");
+        }
+        Err(error) => {
+            println!("Antigravity: discovery worker failed · {error}");
+        }
+    }
+    println!();
+
+    match OllamaClient::new(OllamaConfig::local("__catalog__")) {
+        Ok(client) => match client.list_models().await {
+            Ok(models) => {
+                println!("Ollama Local: connected · {} models", models.len());
+                for model in models {
+                    println!("  ollama-local/{model}");
+                }
+            }
+            Err(error) => {
+                println!("Ollama Local: unavailable · {error}");
+            }
+        },
+        Err(error) => {
+            println!("Ollama Local: unavailable · {error}");
+        }
+    }
+
+    let cloud = reqwest::Client::new()
+        .get("https://ollama.com/api/tags")
+        .send()
+        .await;
+    match cloud {
+        Ok(response) if response.status().is_success() => {
+            let payload = response.json::<Value>().await.unwrap_or_else(|_| json!({}));
+            let mut names = payload
+                .get("models")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|model| {
+                    model
+                        .get("name")
+                        .or_else(|| model.get("model"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect::<Vec<_>>();
+            names.sort();
+            names.dedup();
+            println!("Ollama Cloud catalog: {} models", names.len());
+            for model in names {
+                println!("  ollama-cloud/{model}");
+            }
+            println!("  Login: codex-unchained providers login ollama");
+        }
+        Ok(response) => {
+            println!("Ollama Cloud catalog: HTTP {}", response.status());
+            println!("  Login: codex-unchained providers login ollama");
+        }
+        Err(error) => {
+            println!("Ollama Cloud catalog: unavailable · {error}");
+            println!("  Login: codex-unchained providers login ollama");
+        }
+    }
+    println!();
+
+    let codex = OfficialCodexClient::new();
+    match codex.is_chatgpt_authenticated() {
+        Ok(true) => match codex.list_models() {
+            Ok(models) => {
+                println!("OpenAI / ChatGPT: connected · {} models", models.len());
+                for model in models {
+                    println!("  openai/{}  {}", model.slug, model.label);
+                }
+            }
+            Err(error) => println!("OpenAI / ChatGPT: model discovery failed · {error}"),
+        },
+        Ok(false) => {
+            println!("OpenAI / ChatGPT: not signed in");
+            println!("  Login: codex-unchained providers login codex");
+        }
+        Err(error) => {
+            println!("OpenAI / ChatGPT: status unavailable · {error}");
+        }
+    }
+
+    println!();
+    println!("Model picker: start codex-unchained and use /model.");
+    println!("Provider models are discovered live; you do not add AGY/Ollama models manually.");
     Ok(())
 }
 
@@ -230,7 +337,7 @@ async fn auth_provider(args: AuthArgs) -> Result<(), Box<dyn Error>> {
                 args.api_key_env,
                 models.len()
             );
-            for model in models.iter().take(12) {
+            for model in &models {
                 println!("  {model}");
             }
         }
@@ -276,7 +383,7 @@ async fn auth_provider(args: AuthArgs) -> Result<(), Box<dyn Error>> {
                     "Official Codex is authenticated with ChatGPT. Visible models: {}",
                     models.len()
                 );
-                for model in models.iter().take(20) {
+                for model in &models {
                     println!("  {} ({})", model.label, model.slug);
                 }
                 return Ok(());

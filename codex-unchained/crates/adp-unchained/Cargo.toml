@@ -18,5 +18,6 @@ adp-protocol = { path = "../adp-protocol" }
 adp-teach = { path = "../adp-teach" }
 adp-web = { path = "../adp-web" }
 clap.workspace = true
+reqwest.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

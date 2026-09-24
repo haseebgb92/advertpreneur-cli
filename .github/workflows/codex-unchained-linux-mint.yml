@@ -1,0 +1,143 @@
+name: Codex Unchained Linux Mint Package
+
+concurrency:
+  group: codex-unchained-linux-mint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "codex-unchained-v0.2"
+    paths:
+      - "codex-unchained/**"
+      - ".github/workflows/codex-unchained-linux-mint.yml"
+
+env:
+  CARGO_BUILD_JOBS: "4"
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_DEBUG: "0"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "8"
+
+jobs:
+  package:
+    name: Linux Mint x64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download latest validated patched Codex base
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=50" --jq '[.[] | select(.draft == false and (.tag_name | startswith("codex-unchained-v")))] | .[0].tag_name // ""')"
+          test -n "$base_tag"
+          root="$RUNNER_TEMP/codex-base"
+          mkdir -p "$root"
+          gh release download "$base_tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "patched-codex-linux-x64.tar.gz" \
+            --dir "$root"
+          tar -xzf "$root/patched-codex-linux-x64.tar.gz" -C "$root"
+          test -f "$root/patched-codex-linux-x64/codex-unchained"
+          test "$(tr -d '\r\n' < "$root/patched-codex-linux-x64/UPSTREAM_SHA")" = "$(tr -d '\r\n' < codex-unchained/upstream-patches/UPSTREAM_SHA)"
+          echo "CODEX_BASE_ROOT=$root/patched-codex-linux-x64" >> "$GITHUB_ENV"
+          echo "Using validated Codex base: $base_tag"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: unchained-linux-cargo-${{ hashFiles('codex-unchained/Cargo.lock') }}
+          restore-keys: |
+            unchained-linux-cargo-
+
+      - name: Cache ADP target
+        uses: actions/cache@v4
+        with:
+          path: codex-unchained/target
+          key: unchained-linux-target-${{ hashFiles('codex-unchained/Cargo.lock', 'codex-unchained/crates/**') }}
+          restore-keys: |
+            unchained-linux-target-
+
+      - name: Validate installer
+        shell: bash
+        run: sh -n codex-unchained/install.sh
+
+      - name: Build Linux helpers only
+        shell: bash
+        run: cargo build --manifest-path codex-unchained/Cargo.toml -p adp-unchained -p adp-mcp --release --target x86_64-unknown-linux-gnu
+
+      - name: Test Linux helpers
+        shell: bash
+        run: cargo test --manifest-path codex-unchained/Cargo.toml -p adp-unchained -p adp-model-router
+
+      - name: Assemble Linux Mint package
+        shell: bash
+        run: |
+          dist="codex-unchained/dist/patched-codex-linux-x64"
+          rm -rf "$dist"
+          mkdir -p "$dist"
+          cp "$CODEX_BASE_ROOT/codex-unchained" "$dist/codex-unchained"
+          cp "codex-unchained/target/x86_64-unknown-linux-gnu/release/adp-mcp" "$dist/adp-mcp"
+          cp "codex-unchained/target/x86_64-unknown-linux-gnu/release/adp-unchained" "$dist/adp-unchained"
+          cp -R codex-unchained/extension "$dist/extension"
+          cp -R codex-unchained/antigravity-agent "$dist/antigravity-agent"
+          cp codex-unchained/README.md "$dist/"
+          cp codex-unchained/upstream-patches/UPSTREAM_SHA "$dist/"
+          "$dist/codex-unchained" --version
+          "$dist/adp-unchained" providers --help || true
+          tar -czf codex-unchained/dist/patched-codex-linux-x64.tar.gz -C codex-unchained/dist patched-codex-linux-x64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patched-codex-linux-x64
+          path: codex-unchained/dist/patched-codex-linux-x64.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish Linux Mint prerelease
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: patched-codex-linux-x64
+          path: release-assets
+
+      - name: Verify Linux package
+        shell: bash
+        run: |
+          test -f release-assets/patched-codex-linux-x64.tar.gz
+          sha256sum release-assets/patched-codex-linux-x64.tar.gz > release-assets/SHA256SUMS
+
+      - name: Publish Linux Mint prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="codex-unchained-linux-v0.2.0-alpha.${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" \
+            release-assets/patched-codex-linux-x64.tar.gz \
+            release-assets/SHA256SUMS \
+            codex-unchained/install.sh \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Codex Unchained Linux Mint v0.2 alpha ${GITHUB_RUN_NUMBER}" \
+            --notes "Linux Mint/x64 fast-path release. Reuses the validated patched Codex core and rebuilds only the Unchained Rust helpers." \
+            --prerelease
