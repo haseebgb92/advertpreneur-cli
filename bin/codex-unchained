@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEFAULT_MODEL="${UNCHAINED_MODEL:-agy/gemini-3.8-flash-medium}"
 GATEWAY_PORT="${UNCHAINED_AGY_PORT:-41415}"
 GATEWAY_URL="http://127.0.0.1:${GATEWAY_PORT}"
 UNCHAINED_HOME="${UNCHAINED_HOME:-$HOME/.local/lib/codex-unchained}"
 GATEWAY_BIN="${UNCHAINED_AGY_GATEWAY_BIN:-$UNCHAINED_HOME/codex-unchained-agy-gateway}"
+BROWSER_MCP_BIN="${UNCHAINED_BROWSER_MCP_BIN:-$UNCHAINED_HOME/codex-unchained-browser-mcp}"
+CATALOG_PATH="${UNCHAINED_MODEL_CATALOG:-$UNCHAINED_HOME/models.json}"
 
 usage() {
   cat <<'TXT'
-Codex Unchained = official Codex CLI + alternate model brains.
+Codex Unchained = official Codex CLI with AGY/Ollama brains imported directly.
 
 Usage:
-  codex-unchained [Codex args...]
-  codex-unchained -m agy/<model> [Codex args...]
-  codex-unchained -m ollama/<model> [Codex args...]
-  codex-unchained models
-  codex-unchained doctor
+  codex-unchained [normal Codex args...]
 
-Examples:
-  codex-unchained -m agy/gemini-3.8-flash-medium
-  codex-unchained -m agy/claude-sonnet-4-6
-  codex-unchained -m ollama/gpt-oss:120b-cloud
+Inside Codex:
+  /model    Pick directly from discovered AGY + Ollama models.
+
+Optional:
+  UNCHAINED_MODEL=agy/gemini-3.8-flash-medium codex-unchained
+  codex-unchained -m ollama/qwen3:8b
+  codex-unchained doctor
 TXT
 }
 
@@ -29,102 +29,91 @@ need() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
 }
 
-show_models() {
-  echo "AGY models"
-  echo "----------"
-  if command -v agy >/dev/null 2>&1; then agy models || true; else echo "agy is not installed"; fi
-  echo
-  echo "Ollama models"
-  echo "-------------"
-  if command -v ollama >/dev/null 2>&1; then ollama list || true; else echo "ollama is not installed"; fi
-}
-
 doctor() {
   echo "Codex Unchained doctor"
   echo "----------------------"
   if command -v codex >/dev/null 2>&1; then codex --version; else echo "codex: MISSING"; fi
-  if command -v agy >/dev/null 2>&1; then agy --version 2>/dev/null || echo "agy: installed"; else echo "agy: MISSING (only needed for AGY models)"; fi
-  if command -v ollama >/dev/null 2>&1; then ollama --version 2>/dev/null || echo "ollama: installed"; else echo "ollama: MISSING (only needed for Ollama models)"; fi
-  if [[ -x "$GATEWAY_BIN" ]]; then echo "AGY gateway: $GATEWAY_BIN"; else echo "AGY gateway: MISSING at $GATEWAY_BIN"; fi
+  if command -v agy >/dev/null 2>&1; then agy --version 2>/dev/null || echo "agy: installed"; else echo "agy: not installed"; fi
+  if command -v ollama >/dev/null 2>&1; then ollama --version 2>/dev/null || echo "ollama: installed"; else echo "ollama: not installed"; fi
+  [[ -x "$GATEWAY_BIN" ]] && echo "brain gateway: $GATEWAY_BIN" || echo "brain gateway: MISSING at $GATEWAY_BIN"
+  [[ -x "$BROWSER_MCP_BIN" ]] && echo "browser MCP: $BROWSER_MCP_BIN" || echo "browser MCP: MISSING at $BROWSER_MCP_BIN"
+  [[ -d "$UNCHAINED_HOME/extension" ]] && echo "browser extension: $UNCHAINED_HOME/extension" || echo "browser extension: MISSING"
+  [[ -f "$CATALOG_PATH" ]] && echo "last imported model catalog: $CATALOG_PATH" || true
 }
 
-if [[ ${1:-} == "models" ]]; then show_models; exit 0; fi
 if [[ ${1:-} == "doctor" ]]; then doctor; exit 0; fi
 if [[ ${1:-} == "--help-unchained" ]]; then usage; exit 0; fi
 
-model_spec="$DEFAULT_MODEL"
-forward=()
-while (($#)); do
-  case "$1" in
-    -m|--model)
-      [[ $# -ge 2 ]] || { echo "$1 requires a model" >&2; exit 2; }
-      model_spec="$2"
-      shift 2
-      ;;
-    --model=*)
-      model_spec="${1#--model=}"
-      shift
-      ;;
-    *)
-      forward+=("$1")
-      shift
-      ;;
-  esac
-done
-
-if [[ "$model_spec" != */* ]]; then
-  default_provider="${UNCHAINED_PROVIDER:-agy}"
-  model_spec="${default_provider}/${model_spec}"
-fi
-provider="${model_spec%%/*}"
-model="${model_spec#*/}"
-
 need codex
+need curl
+[[ -x "$GATEWAY_BIN" ]] || { echo "Brain gateway not installed: $GATEWAY_BIN" >&2; exit 1; }
 
-case "$provider" in
-  ollama)
-    need ollama
-    exec codex --oss -m "$model" "${forward[@]}"
-    ;;
-  agy|antigravity)
-    need agy
-    [[ -x "$GATEWAY_BIN" ]] || { echo "AGY gateway not installed: $GATEWAY_BIN" >&2; exit 1; }
-    need curl
+mkdir -p "$UNCHAINED_HOME"
+started_gateway=0
+gateway_pid=""
 
-    started_gateway=0
-    if ! curl -fsS "$GATEWAY_URL/health" >/dev/null 2>&1; then
-      mkdir -p "$UNCHAINED_HOME"
-      "$GATEWAY_BIN" >"$UNCHAINED_HOME/agy-gateway.log" 2>&1 &
-      gateway_pid=$!
-      started_gateway=1
-      for _ in {1..50}; do
-        if curl -fsS "$GATEWAY_URL/health" >/dev/null 2>&1; then break; fi
-        if ! kill -0 "$gateway_pid" 2>/dev/null; then
-          echo "AGY gateway failed to start. See $UNCHAINED_HOME/agy-gateway.log" >&2
-          exit 1
-        fi
-        sleep 0.1
-      done
-      curl -fsS "$GATEWAY_URL/health" >/dev/null 2>&1 || { echo "AGY gateway did not become ready" >&2; exit 1; }
+cleanup() {
+  if [[ "$started_gateway" == 1 && -n "$gateway_pid" ]]; then
+    kill "$gateway_pid" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+if ! curl -fsS "$GATEWAY_URL/health" >/dev/null 2>&1; then
+  "$GATEWAY_BIN" >"$UNCHAINED_HOME/brain-gateway.log" 2>&1 &
+  gateway_pid=$!
+  started_gateway=1
+  for _ in {1..50}; do
+    if curl -fsS "$GATEWAY_URL/health" >/dev/null 2>&1; then break; fi
+    if ! kill -0 "$gateway_pid" 2>/dev/null; then
+      echo "Brain gateway failed to start. See $UNCHAINED_HOME/brain-gateway.log" >&2
+      exit 1
     fi
+    sleep 0.1
+  done
+  curl -fsS "$GATEWAY_URL/health" >/dev/null 2>&1 || {
+    echo "Brain gateway did not become ready" >&2
+    exit 1
+  }
+fi
 
-    cleanup() {
-      if [[ "$started_gateway" == 1 ]]; then kill "$gateway_pid" >/dev/null 2>&1 || true; fi
-    }
-    trap cleanup EXIT INT TERM
+tmp_catalog="$CATALOG_PATH.tmp"
+if ! curl -fsS "$GATEWAY_URL/v1/models" -o "$tmp_catalog"; then
+  rm -f "$tmp_catalog"
+  echo "Could not import AGY/Ollama models. Check $UNCHAINED_HOME/brain-gateway.log" >&2
+  exit 1
+fi
+mv "$tmp_catalog" "$CATALOG_PATH"
 
-    set +e
-    codex \
-      -c 'model_provider="agy-unchained"' \
-      -c "model_providers.agy-unchained={name=\"Antigravity\",base_url=\"${GATEWAY_URL}/v1\",wire_api=\"responses\",requires_openai_auth=false,supports_websockets=false,supports_standalone_web_search=false}" \
-      -m "$model" \
-      "${forward[@]}"
-    status=$?
-    set -e
-    exit "$status"
-    ;;
-  *)
-    echo "Unknown brain provider '$provider'. Use agy/<model> or ollama/<model>." >&2
-    exit 2
-    ;;
-esac
+provider_config="model_providers.unchained={name=\"Codex Unchained\",base_url=\"$GATEWAY_URL/v1\",wire_api=\"responses\",requires_openai_auth=false,supports_websockets=false,supports_standalone_web_search=false}"
+catalog_config="model_catalog_json=\"$CATALOG_PATH\""
+
+codex_args=(
+  -c 'model_provider="unchained"'
+  -c "$provider_config"
+  -c "$catalog_config"
+)
+
+if [[ -x "$BROWSER_MCP_BIN" ]]; then
+  browser_config="mcp_servers.unchained_browser.command=\"$BROWSER_MCP_BIN\""
+  codex_args+=(-c "$browser_config")
+fi
+
+if [[ -n ${UNCHAINED_MODEL:-} ]]; then
+  has_model=0
+  for arg in "$@"; do
+    if [[ "$arg" == "-m" || "$arg" == "--model" || "$arg" == --model=* ]]; then
+      has_model=1
+      break
+    fi
+  done
+  if [[ "$has_model" == 0 ]]; then
+    codex_args+=(-m "$UNCHAINED_MODEL")
+  fi
+fi
+
+set +e
+codex "${codex_args[@]}" "$@"
+status=$?
+set -e
+exit "$status"
