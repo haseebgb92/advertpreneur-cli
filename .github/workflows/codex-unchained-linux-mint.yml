@@ -9,12 +9,6 @@ permissions:
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - "codex-unchained-v0.2"
-    paths:
-      - "codex-unchained/**"
-      - ".github/workflows/codex-unchained-linux-mint.yml"
 
 env:
   CARGO_BUILD_JOBS: "4"
