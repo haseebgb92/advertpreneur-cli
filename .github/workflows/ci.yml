@@ -1,0 +1,29 @@
+name: Codex Unchained CI
+
+on:
+  push:
+    branches: [codex-unchained-v0.1]
+  pull_request:
+
+jobs:
+  gateway:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build AGY gateway
+        run: cargo build --release --manifest-path agy-gateway/Cargo.toml
+      - name: Rust tests
+        run: cargo test --manifest-path agy-gateway/Cargo.toml
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate shell scripts
+        run: |
+          bash -n install.sh
+          bash -n bin/codex-unchained

@@ -1,1 +1,0 @@
-Inspect this sample project. Add a Features section below the hero with three responsive cards titled Fast, Safe, and Local. Add a Features link to the existing navigation. Match the existing light visual style and keep the implementation simple. Run `python verify.py` and do not finish until it passes.

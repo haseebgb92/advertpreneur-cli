@@ -1,1 +1,0 @@
-Inspect this repository and repair the TaskBoard implementation completely. Several behaviors are wrong across multiple files. Preserve the public API and do not modify verify.py. Use the existing README and verifier to determine the required behavior. Run python verify.py, diagnose every failure, keep fixing until it passes, and then report exactly what you changed.

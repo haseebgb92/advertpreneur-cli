@@ -1,0 +1,12 @@
+[package]
+name = "codex-unchained-agy-gateway"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+axum = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "net"] }
+uuid = { version = "1", features = ["v4"] }
