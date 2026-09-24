@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Codex Unchained Browser Bridge",
+  "version": "0.2.0",
+  "description": "Thin Chrome/Edge bridge that exposes the active browser to official Codex through MCP.",
+  "permissions": [
+    "activeTab",
+    "alarms",
+    "downloads",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "http://127.0.0.1:8765/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "Codex Unchained Browser Bridge"
+  }
+}
