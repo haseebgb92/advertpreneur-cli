@@ -7,17 +7,26 @@ LIB_DIR="${HOME}/.local/lib/codex-unchained"
 AGENT_DIR="${HOME}/.gemini/config/agents/codex-unchained-brain"
 
 command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
-command -v cargo >/dev/null 2>&1 || { echo "Rust/Cargo is required to build the small AGY gateway." >&2; echo "Install rustup, then rerun this installer." >&2; exit 1; }
+command -v cargo >/dev/null 2>&1 || { echo "Rust/Cargo is required to build the two small Unchained adapters." >&2; exit 1; }
 
 mkdir -p "$BIN_DIR" "$LIB_DIR" "$AGENT_DIR"
 
 echo "==> Installing official OpenAI Codex CLI ${CODEX_VERSION}"
 curl -fsSL https://chatgpt.com/codex/install.sh | env CODEX_RELEASE="$CODEX_VERSION" CODEX_NON_INTERACTIVE=1 sh
 
-echo "==> Building AGY compatibility gateway"
+echo "==> Building model-brain gateway"
 cargo build --release --manifest-path "$ROOT/agy-gateway/Cargo.toml"
 cp "$ROOT/agy-gateway/target/release/codex-unchained-agy-gateway" "$LIB_DIR/codex-unchained-agy-gateway"
 chmod +x "$LIB_DIR/codex-unchained-agy-gateway"
+
+echo "==> Building browser MCP bridge"
+cargo build --release --manifest-path "$ROOT/browser-mcp/Cargo.toml"
+cp "$ROOT/browser-mcp/target/release/codex-unchained-browser-mcp" "$LIB_DIR/codex-unchained-browser-mcp"
+chmod +x "$LIB_DIR/codex-unchained-browser-mcp"
+
+echo "==> Installing Chrome/Edge extension"
+rm -rf "$LIB_DIR/extension"
+cp -R "$ROOT/extension" "$LIB_DIR/extension"
 
 echo "==> Installing model-only Antigravity agent"
 cp "$ROOT/agents/codex-unchained-brain/agent.md" "$AGENT_DIR/agent.md"
@@ -28,8 +37,11 @@ chmod +x "$BIN_DIR/codex-unchained"
 ln -sfn "$BIN_DIR/codex-unchained" "$BIN_DIR/unchained"
 
 echo
-echo "Installed. Ensure $BIN_DIR is on PATH, then run:"
-echo "  codex-unchained doctor"
-echo "  codex-unchained models"
-echo "  codex-unchained -m agy/gemini-3.8-flash-medium"
-echo "  codex-unchained -m ollama/gpt-oss:120b-cloud"
+echo "Installed."
+echo "Run: codex-unchained"
+echo "Then use /model inside Codex to pick any discovered AGY or Ollama model."
+echo
+echo "Browser extension:"
+echo "  Chrome: chrome://extensions"
+echo "  Edge:   edge://extensions"
+echo "Enable Developer mode -> Load unpacked -> $LIB_DIR/extension"
