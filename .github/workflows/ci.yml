@@ -61,9 +61,13 @@ jobs:
               raise SystemExit(0)
 
           prompt = ""
-          for i, arg in enumerate(sys.argv[:-1]):
-              if arg == "-p":
-                  prompt = sys.argv[i + 1]
+          for line in sys.stdin:
+              try:
+                  event = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if event.get("event") == "user":
+                  prompt = event.get("message", {}).get("content", "")
                   break
 
           if '"type": "function_call_output"' in prompt:
@@ -91,8 +95,26 @@ jobs:
               }
 
           print(json.dumps({
-              "status": "SUCCESS",
-              "structured_output": decision,
+              "event": "init",
+              "conversation_id": "fake-ci",
+              "init": {"tools": [], "permission_mode": "request-review"}
+          }))
+          print(json.dumps({
+              "event": "result",
+              "result": {
+                  "conversation_id": "fake-ci",
+                  "status": "SUCCESS",
+                  "response": json.dumps(decision),
+                  "structured_output": decision,
+                  "num_turns": 1,
+                  "usage": {
+                      "input_tokens": 0,
+                      "output_tokens": 0,
+                      "thinking_tokens": 0,
+                      "cache_read_tokens": 0,
+                      "total_tokens": 0
+                  }
+              }
           }))
           PY
           chmod +x "$RUNNER_TEMP/fakebin/agy"
