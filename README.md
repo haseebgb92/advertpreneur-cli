@@ -1,34 +1,147 @@
 # Codex Unchained
 
-Codex Unchained keeps the **official OpenAI Codex CLI intact** and changes only the model brain.
-
-The project deliberately does **not** reimplement Codex's TUI, tool loop, approvals, sandbox, MCP handling, browser/computer use, file editing, shell execution, memory, or orchestration. Those remain upstream Codex behavior.
+Codex Unchained keeps the **official OpenAI Codex CLI intact** and swaps only the inference brain.
 
 Current upstream lock: **Codex CLI 0.156.1**.
 
-## Brains
+Codex still owns the TUI, conversation/tool loop, shell, file editing, patches, approvals, sandbox, MCP, browser tools, session state, and execution. AGY and Ollama only decide the next assistant response or Codex tool call.
 
-### AGY / Google Antigravity
+## Model selection: use Codex /model
 
-AGY runs as a model-only backend. A tiny local compatibility gateway converts Codex's native Responses API requests into headless `agy` requests and converts the structured answer back into native Codex Responses API events. The Codex context is sent to AGY over its `stream-json` stdin protocol rather than as a command-line argument, so large contexts remain practical on Windows as well as Linux/macOS.
+There is no separate model-fetch workflow.
 
-The bundled Antigravity custom agent has `tools: []`, `inheritMcp: false`, and command execution disabled. Codex remains the only component allowed to use host tools. Provider-native server tools such as OpenAI-hosted web search are not impersonated by the gateway; browser/MCP/shell/file actions continue through Codex.
+Every time `codex-unchained` starts, the brain gateway discovers:
 
-Examples:
+- models exposed by `agy models`;
+- models exposed by `ollama list`.
+
+It converts them into a native Codex model catalog using metadata from the **installed official Codex build** and starts Codex with that catalog.
+
+Run:
 
 ```bash
-codex-unchained -m agy/gemini-3.8-flash-medium
-codex-unchained -m agy/claude-sonnet-4-6
+codex-unchained
 ```
+
+Then inside Codex:
+
+```text
+/model
+```
+
+AGY and Ollama brains appear in the normal Codex model picker. Their internal slugs are namespaced so the gateway knows where inference should go, for example:
+
+```text
+agy/gemini-3.8-flash-medium
+agy/claude-sonnet-4-6
+ollama/qwen3:8b
+```
+
+You can still use normal Codex `-m` when useful:
+
+```bash
+codex-unchained -m agy/gemini-3.8-flash-high
+codex-unchained -m ollama/qwen3:8b
+```
+
+Or set an optional startup default:
+
+```bash
+export UNCHAINED_MODEL=agy/gemini-3.8-flash-medium
+```
+
+If no default is forced, Codex uses the first available picker model and you can switch with `/model`.
+
+## Brain architecture
+
+```text
+                               ┌─ AGY / Antigravity model
+                               │
+You → official Codex CLI → brain gateway
+          │                    │
+          │                    └─ Ollama model
+          │
+          ├─ shell / files / patches
+          ├─ approvals / sandbox
+          ├─ MCP
+          └─ browser extension via MCP
+```
+
+### AGY
+
+AGY runs through a model-only Antigravity agent:
+
+- `tools: []`
+- `inheritMcp: false`
+- command execution disabled
+
+The Codex request is transported to AGY through its `stream-json` stdin protocol, which avoids command-line size limits on Windows.
 
 ### Ollama
 
-Ollama uses Codex's own OSS provider path. No gateway is needed.
+Ollama is also treated as a model-only brain. The gateway sends the same Codex conversation/tool descriptions to Ollama and requires the same structured decision format. Ollama does **not** independently execute host tools.
 
-```bash
-codex-unchained -m ollama/gpt-oss:120b-cloud
-codex-unchained -m ollama/qwen3:8b
+That keeps the rule consistent across providers:
+
+> **Codex acts. The selected model thinks.**
+
+## Browser extension
+
+The Chrome/Edge extension is restored, but not the old ADP browser runtime.
+
+The extension is now a thin execution bridge:
+
+```text
+Codex tool loop
+     │
+     ▼
+Codex MCP client
+     │
+     ▼
+codex-unchained-browser-mcp
+     │ localhost :8765
+     ▼
+Chrome / Edge extension
+     │
+     ▼
+existing browser profile + active tab
 ```
+
+The browser MCP currently exposes:
+
+- bind active tab;
+- semantic page inspection;
+- navigate;
+- click;
+- fill non-sensitive controls;
+- scroll;
+- screenshot;
+- wait for completed downloads.
+
+The model does not talk directly to the extension. It selects a Codex tool; Codex invokes the MCP server; the MCP server transports the action to the extension.
+
+### Load the extension
+
+The installer copies the unpacked extension into the Unchained install directory.
+
+On Linux/macOS the default path is:
+
+```text
+~/.local/lib/codex-unchained/extension
+```
+
+On Windows the installer prints the exact `%LOCALAPPDATA%\CodexUnchained\extension` path.
+
+Chrome:
+
+1. Open `chrome://extensions`
+2. Enable **Developer mode**
+3. Click **Load unpacked**
+4. Select the installed `extension` directory
+
+Edge uses `edge://extensions`.
+
+After that, `codex-unchained` automatically registers the browser MCP with official Codex.
 
 ## Install
 
@@ -37,17 +150,16 @@ codex-unchained -m ollama/qwen3:8b
 Requirements:
 
 - `curl`
-- Rust/Cargo (only to build the small AGY gateway)
-- `agy` if you want Antigravity models
-- `ollama` if you want Ollama models
+- Rust/Cargo
+- `agy` for AGY models
+- `ollama` for Ollama models
 
 ```bash
 git clone -b codex-unchained-v0.1 https://github.com/haseebgb92/advertpreneur-cli.git
 cd advertpreneur-cli
+chmod +x install.sh
 ./install.sh
 ```
-
-The installer downloads the official Codex CLI version listed in `UPSTREAM_CODEX_VERSION`; it does not compile or patch Codex.
 
 ### Windows
 
@@ -57,66 +169,33 @@ cd advertpreneur-cli
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-## Usage
+The installer downloads the official Codex version listed in `UPSTREAM_CODEX_VERSION`. It does not compile or patch Codex itself. It builds only the small provider gateway and browser MCP adapter.
+
+## Diagnostics
 
 ```bash
 codex-unchained doctor
-codex-unchained models
-codex-unchained
 ```
 
-The default brain is:
+This reports the official Codex version, AGY/Ollama availability, brain gateway, browser MCP binary, extension path, and last imported catalog.
 
-```text
-agy/gemini-3.8-flash-medium
-```
+## Why the old runtime is gone
 
-Override it per run with normal Codex `-m` / `--model` syntax:
+The earlier implementation duplicated browser, agent, executor, model-router, MCP, memory, and runtime behavior around Codex. That caused Unchained behavior to diverge from upstream Codex.
 
-```bash
-codex-unchained -m agy/gemini-3.8-flash-high
-codex-unchained -m ollama/gpt-oss:120b-cloud
-```
+The current design removes those competing layers. The only custom pieces are adapters at the edges:
 
-All other arguments are forwarded to the official `codex` executable unchanged.
+1. **brain gateway** — translates official Codex inference requests to AGY or Ollama;
+2. **browser MCP bridge + extension** — gives official Codex access to the user's existing browser.
 
-You can also set a default:
+Everything in between stays upstream Codex.
 
-```bash
-export UNCHAINED_MODEL=agy/claude-sonnet-4-6
-```
-
-## Architecture
-
-```text
-You
- │
- ▼
-official Codex CLI 0.156.1
- │
- ├─ tools / shell / files / browser / MCP / approvals / sandbox → Codex
- │
- └─ inference only
-      ├─ Ollama → Codex built-in OSS provider
-      └─ AGY → localhost compatibility gateway → agy --model ...
-```
-
-For AGY, the model receives the Codex conversation and Codex tool schemas as data. It may choose a Codex tool call, but it cannot execute the tool itself. Codex receives that choice and runs it through its normal upstream tool loop.
-
-That separation is the point of Unchained: **same Codex, different brain**.
-
-## Why this replaces the old implementation
-
-The previous branch duplicated browser, agent, runtime, MCP, model-router, memory, and executor behavior around Codex. That made browser/tool behavior diverge from upstream Codex and created failures such as repeated browser navigation loops.
-
-This version removes that duplicated runtime. If upstream Codex knows how to operate Chrome/MCP correctly, Unchained inherits that behavior because it is the same executable and tool loop.
-
-## Upgrading Codex
-
-Change `UPSTREAM_CODEX_VERSION` only after testing the AGY gateway against that version, then rerun the installer.
-
-The legacy pre-cleanup implementation is preserved on:
+The pre-cleanup implementation is preserved at:
 
 ```text
 codex-unchained-legacy-20260924
 ```
+
+## Upgrading Codex
+
+Update `UPSTREAM_CODEX_VERSION`, run the compatibility CI, and rerun the installer. Because Codex itself is not forked or patched, upstream upgrades remain intentionally small.
