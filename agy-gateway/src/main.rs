@@ -8,13 +8,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{
-    env,
-    net::SocketAddr,
-    process::Stdio,
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{env, net::SocketAddr, process::Stdio, sync::Arc};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use uuid::Uuid;
@@ -22,8 +16,12 @@ use uuid::Uuid;
 #[derive(Clone)]
 struct AppState {
     agy_bin: String,
+    codex_bin: String,
+    ollama_bin: String,
+    ollama_url: String,
     agent: String,
     timeout: String,
+    http: reqwest::Client,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +56,14 @@ struct ToolRecord {
     kind: ToolKind,
 }
 
+#[derive(Debug, Clone)]
+struct DiscoveredModel {
+    slug: String,
+    display_name: String,
+    description: String,
+    priority: i32,
+}
+
 #[tokio::main]
 async fn main() {
     let host = env::var("UNCHAINED_AGY_HOST").unwrap_or_else(|_| "127.0.0.1".into());
@@ -65,11 +71,19 @@ async fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(41415);
+
     let state = Arc::new(AppState {
         agy_bin: env::var("UNCHAINED_AGY_BIN").unwrap_or_else(|_| "agy".into()),
+        codex_bin: env::var("UNCHAINED_CODEX_BIN").unwrap_or_else(|_| "codex".into()),
+        ollama_bin: env::var("UNCHAINED_OLLAMA_BIN").unwrap_or_else(|_| "ollama".into()),
+        ollama_url: env::var("OLLAMA_HOST")
+            .unwrap_or_else(|_| "http://127.0.0.1:11434".into())
+            .trim_end_matches('/')
+            .to_string(),
         agent: env::var("UNCHAINED_AGY_AGENT")
             .unwrap_or_else(|_| "codex-unchained-brain".into()),
         timeout: env::var("UNCHAINED_AGY_TIMEOUT").unwrap_or_else(|_| "10m".into()),
+        http: reqwest::Client::new(),
     });
 
     let app = Router::new()
@@ -83,47 +97,164 @@ async fn main() {
         .expect("valid listen address");
     let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .expect("bind AGY gateway");
-    eprintln!("Codex Unchained AGY gateway listening on http://{addr}/v1");
+        .expect("bind Unchained brain gateway");
+
+    eprintln!("Codex Unchained brain gateway listening on http://{addr}/v1");
     axum::serve(listener, app)
         .await
-        .expect("serve AGY gateway");
+        .expect("serve Unchained brain gateway");
 }
 
 async fn health() -> impl IntoResponse {
-    Json(json!({"ok": true, "service": "codex-unchained-agy-gateway"}))
+    Json(json!({"ok": true, "service": "codex-unchained-brain-gateway"}))
 }
 
 async fn models(State(state): State<Arc<AppState>>) -> Response {
-    match Command::new(&state.agy_bin).arg("models").output().await {
-        Ok(out) if out.status.success() => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            let data: Vec<Value> = stdout
-                .lines()
-                .filter_map(|line| line.split_whitespace().next())
-                .filter(|slug| !slug.is_empty())
-                .map(|slug| {
-                    json!({
-                        "id": slug,
-                        "object": "model",
-                        "owned_by": "antigravity"
-                    })
-                })
-                .collect();
-            Json(json!({"object": "list", "data": data})).into_response()
-        }
-        Ok(out) => error_response(
-            StatusCode::BAD_GATEWAY,
-            format!(
-                "agy models failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
-        ),
-        Err(err) => error_response(
-            StatusCode::BAD_GATEWAY,
-            format!("could not run agy: {err}"),
-        ),
+    match build_codex_catalog(&state).await {
+        Ok(catalog) => Json(catalog).into_response(),
+        Err(message) => error_response(StatusCode::BAD_GATEWAY, message),
     }
+}
+
+async fn build_codex_catalog(state: &AppState) -> Result<Value, String> {
+    let output = Command::new(&state.codex_bin)
+        .args(["debug", "models", "--bundled"])
+        .output()
+        .await
+        .map_err(|err| format!("could not run '{} debug models --bundled': {err}", state.codex_bin))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "could not read bundled Codex model metadata: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let bundled: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|err| format!("Codex bundled model catalog was not valid JSON: {err}"))?;
+
+    let templates = bundled
+        .get("models")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Codex bundled catalog did not contain a models array".to_string())?;
+
+    let template = templates
+        .iter()
+        .filter(|model| model.get("visibility").and_then(Value::as_str) == Some("list"))
+        .min_by_key(|model| model.get("priority").and_then(Value::as_i64).unwrap_or(i64::MAX))
+        .or_else(|| templates.first())
+        .cloned()
+        .ok_or_else(|| "Codex bundled catalog is empty".to_string())?;
+
+    let mut discovered = discover_agy_models(state).await;
+    discovered.extend(discover_ollama_models(state).await);
+
+    if discovered.is_empty() {
+        return Err(
+            "No Unchained brains were discovered. Install/login to AGY or install/start Ollama."
+                .into(),
+        );
+    }
+
+    discovered.sort_by_key(|model| model.priority);
+
+    let mut models = Vec::with_capacity(discovered.len());
+    for discovered in discovered {
+        let mut model = template.clone();
+        model["slug"] = Value::String(discovered.slug);
+        model["display_name"] = Value::String(discovered.display_name);
+        model["description"] = Value::String(discovered.description);
+        model["priority"] = Value::Number(discovered.priority.into());
+        model["visibility"] = Value::String("list".into());
+        model["supported_in_api"] = Value::Bool(true);
+
+        // Provider-agnostic brains receive Codex's complete prompt/tool schema
+        // through the gateway. Provider-specific request knobs must stay off.
+        model["default_reasoning_level"] = Value::Null;
+        model["supported_reasoning_levels"] = Value::Array(Vec::new());
+        model["additional_speed_tiers"] = Value::Array(Vec::new());
+        model["service_tiers"] = Value::Array(Vec::new());
+        model["default_service_tier"] = Value::Null;
+        model["available_access_programs"] = Value::Null;
+        model["availability_nux"] = Value::Null;
+        model["upgrade"] = Value::Null;
+        model["supports_reasoning_summary_parameter"] = Value::Bool(false);
+        model["support_verbosity"] = Value::Bool(false);
+        model["default_verbosity"] = Value::Null;
+        model["supports_search_tool"] = Value::Bool(false);
+        model["input_modalities"] = json!(["text"]);
+
+        // Keep Codex's own base instructions, tool metadata, shell/apply-patch
+        // behavior, compaction policy, and other runtime metadata from the
+        // currently installed official Codex build.
+        models.push(model);
+    }
+
+    Ok(json!({"models": models}))
+}
+
+async fn discover_agy_models(state: &AppState) -> Vec<DiscoveredModel> {
+    let Ok(output) = Command::new(&state.agy_bin).arg("models").output().await else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut models = Vec::new();
+    for (index, line) in stdout.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let Some(raw_slug) = parts.next() else {
+            continue;
+        };
+        let label = parts.collect::<Vec<_>>().join(" ");
+        let display = if label.is_empty() {
+            raw_slug.to_string()
+        } else {
+            label
+        };
+        let preferred = raw_slug == "gemini-3.8-flash-medium";
+        models.push(DiscoveredModel {
+            slug: format!("agy/{raw_slug}"),
+            display_name: format!("{display} · AGY"),
+            description: format!("AGY brain: {raw_slug}"),
+            priority: if preferred { 0 } else { 10 + index as i32 },
+        });
+    }
+    models
+}
+
+async fn discover_ollama_models(state: &AppState) -> Vec<DiscoveredModel> {
+    let Ok(output) = Command::new(&state.ollama_bin).arg("list").output().await else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .skip_while(|line| line.trim().is_empty())
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let slug = line.split_whitespace().next()?;
+            if slug.eq_ignore_ascii_case("name") || slug.is_empty() {
+                return None;
+            }
+            Some(DiscoveredModel {
+                slug: format!("ollama/{slug}"),
+                display_name: format!("{slug} · Ollama"),
+                description: format!("Ollama brain: {slug}"),
+                priority: 100 + index as i32,
+            })
+        })
+        .collect()
 }
 
 async fn responses(
@@ -132,8 +263,38 @@ async fn responses(
 ) -> Response {
     let available_tools = flatten_tools(&req.tools);
     let prompt = build_prompt(&req);
+    let schema_value = decision_schema();
+    let schema_string = schema_value.to_string();
 
-    let schema = json!({
+    let decision = if let Some(model) = req.model.strip_prefix("agy/") {
+        match infer_agy(&state, model, prompt, schema_string).await {
+            Ok(decision) => decision,
+            Err(message) => return error_response(StatusCode::BAD_GATEWAY, message),
+        }
+    } else if let Some(model) = req.model.strip_prefix("ollama/") {
+        match infer_ollama(&state, model, prompt, schema_value).await {
+            Ok(decision) => decision,
+            Err(message) => return error_response(StatusCode::BAD_GATEWAY, message),
+        }
+    } else {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Unknown Unchained model '{}'. Select a model from Codex /model.",
+                req.model
+            ),
+        );
+    };
+
+    if let Err(message) = validate_decision(&req, &decision, &available_tools) {
+        return error_response(StatusCode::BAD_GATEWAY, message);
+    }
+
+    render_responses_sse(&req, &decision, &available_tools)
+}
+
+fn decision_schema() -> Value {
+    json!({
         "type": "object",
         "properties": {
             "type": {
@@ -167,15 +328,21 @@ async fn responses(
         "required": ["type", "content", "tool_calls"],
         "additionalProperties": false
     })
-    .to_string();
+}
 
+async fn infer_agy(
+    state: &AppState,
+    model: &str,
+    prompt: String,
+    schema: String,
+) -> Result<Value, String> {
     let mut cmd = Command::new(&state.agy_bin);
     cmd.arg("--input-format")
         .arg("stream-json")
         .arg("--output-format")
         .arg("stream-json")
         .arg("--model")
-        .arg(&req.model)
+        .arg(model)
         .arg("--agent")
         .arg(&state.agent)
         .arg("--json-schema")
@@ -186,15 +353,9 @@ async fn responses(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(err) => {
-            return error_response(
-                StatusCode::BAD_GATEWAY,
-                format!("could not run agy: {err}"),
-            );
-        }
-    };
+    let mut child = cmd
+        .spawn()
+        .map_err(|err| format!("could not run AGY: {err}"))?;
 
     let user_event = json!({
         "event": "user",
@@ -205,25 +366,15 @@ async fn responses(
     if let Some(mut stdin) = child.stdin.take() {
         if let Err(err) = stdin.write_all(format!("{user_event}\n").as_bytes()).await {
             let _ = child.kill().await;
-            return error_response(
-                StatusCode::BAD_GATEWAY,
-                format!("could not send prompt to agy: {err}"),
-            );
+            return Err(format!("could not send prompt to AGY: {err}"));
         }
-        // Closing stdin after the one prompt is the documented graceful way
-        // to finish a stream-json session once the active turn completes.
         drop(stdin);
     }
 
-    let output = match child.wait_with_output().await {
-        Ok(out) => out,
-        Err(err) => {
-            return error_response(
-                StatusCode::BAD_GATEWAY,
-                format!("could not wait for agy: {err}"),
-            );
-        }
-    };
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|err| format!("could not wait for AGY: {err}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut result = None;
@@ -238,97 +389,135 @@ async fn responses(
 
     let Some(result) = result else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return error_response(
-            StatusCode::BAD_GATEWAY,
-            format!(
-                "agy returned no result event (exit {}): {}",
-                output.status,
-                stderr.trim()
-            ),
-        );
+        return Err(format!(
+            "AGY returned no result event (exit {}): {}",
+            output.status,
+            stderr.trim()
+        ));
     };
 
     if !output.status.success()
         || result.get("status").and_then(Value::as_str) != Some("SUCCESS")
     {
-        let message = result
-            .get("error")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if stderr.trim().is_empty() {
-                    format!("AGY exited with {}", output.status)
-                } else {
-                    stderr.trim().to_string()
-                }
-            });
-        return error_response(StatusCode::BAD_GATEWAY, message);
+        return Err(
+            result
+                .get("error")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if stderr.trim().is_empty() {
+                        format!("AGY exited with {}", output.status)
+                    } else {
+                        stderr.trim().to_string()
+                    }
+                }),
+        );
     }
 
-    let decision = match result.get("structured_output") {
-        Some(Value::Object(map)) => Value::Object(map.clone()),
-        _ => {
-            return error_response(
-                StatusCode::BAD_GATEWAY,
-                "AGY did not return structured_output".into(),
-            );
-        }
-    };
+    match result.get("structured_output") {
+        Some(Value::Object(map)) => Ok(Value::Object(map.clone())),
+        _ => Err("AGY did not return structured_output".into()),
+    }
+}
 
+async fn infer_ollama(
+    state: &AppState,
+    model: &str,
+    prompt: String,
+    schema: Value,
+) -> Result<Value, String> {
+    let url = format!("{}/api/chat", state.ollama_url);
+    let response = state
+        .http
+        .post(url)
+        .json(&json!({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": false,
+            "format": schema
+        }))
+        .send()
+        .await
+        .map_err(|err| {
+            format!(
+                "could not reach Ollama at {}: {err}. Start Ollama first.",
+                state.ollama_url
+            )
+        })?;
+
+    let status = response.status();
+    let payload: Value = response
+        .json()
+        .await
+        .map_err(|err| format!("Ollama returned invalid JSON: {err}"))?;
+
+    if !status.is_success() {
+        let message = payload
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("Ollama request failed");
+        return Err(format!("Ollama HTTP {}: {message}", status.as_u16()));
+    }
+
+    let content = payload
+        .pointer("/message/content")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Ollama response did not contain message.content".to_string())?;
+
+    serde_json::from_str(content)
+        .map_err(|err| format!("Ollama brain did not return the required structured decision: {err}"))
+}
+
+fn validate_decision(
+    req: &ResponsesRequest,
+    decision: &Value,
+    available_tools: &[ToolRecord],
+) -> Result<(), String> {
     let decision_type = decision
         .get("type")
         .and_then(Value::as_str)
         .unwrap_or("assistant");
 
-    if decision_type == "tool_calls" {
-        let calls = decision
-            .get("tool_calls")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+    if decision_type != "tool_calls" {
+        return Ok(());
+    }
 
-        if calls.is_empty() {
-            return error_response(
-                StatusCode::BAD_GATEWAY,
-                "AGY selected tool_calls but returned no calls".into(),
-            );
-        }
-        if !req.parallel_tool_calls && calls.len() > 1 {
-            return error_response(
-                StatusCode::BAD_GATEWAY,
-                "AGY returned parallel tool calls when Codex disabled them".into(),
-            );
-        }
-        if req.tool_choice.as_str() == Some("none") {
-            return error_response(
-                StatusCode::BAD_GATEWAY,
-                "AGY selected a tool while Codex tool_choice was none".into(),
-            );
-        }
+    let calls = decision
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
 
-        for call in &calls {
-            let name = call
-                .get("tool_name")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let namespace = call
-                .get("tool_namespace")
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty());
-            if find_tool(&available_tools, namespace, name).is_none() {
-                let display = namespace
-                    .map(|ns| format!("{ns}.{name}"))
-                    .unwrap_or_else(|| name.to_string());
-                return error_response(
-                    StatusCode::BAD_GATEWAY,
-                    format!("AGY selected unavailable Codex tool: {display}"),
-                );
-            }
+    if calls.is_empty() {
+        return Err("brain selected tool_calls but returned no calls".into());
+    }
+    if !req.parallel_tool_calls && calls.len() > 1 {
+        return Err("brain returned parallel tool calls when Codex disabled them".into());
+    }
+    if req.tool_choice.as_str() == Some("none") {
+        return Err("brain selected a tool while Codex tool_choice was none".into());
+    }
+
+    for call in &calls {
+        let name = call
+            .get("tool_name")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let namespace = call
+            .get("tool_namespace")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty());
+
+        if find_tool(available_tools, namespace, name).is_none() {
+            let display = namespace
+                .map(|ns| format!("{ns}.{name}"))
+                .unwrap_or_else(|| name.to_string());
+            return Err(format!("brain selected unavailable Codex tool: {display}"));
         }
     }
 
-    render_responses_sse(&req, &decision, &available_tools)
+    Ok(())
 }
 
 fn build_prompt(req: &ResponsesRequest) -> String {
@@ -342,9 +531,10 @@ fn build_prompt(req: &ResponsesRequest) -> String {
 Codex itself owns the terminal, files, browser/computer control, MCP servers,
 approvals, patching, sandbox, and every other host capability.
 
-Never execute an Antigravity tool. Never browse. Never run commands. Never
-read or write files. Never call an AGY MCP server. Your only job is to decide
-what Codex should say next or which Codex-provided tool(s) Codex should execute.
+Never execute provider-native tools. Never browse on your own. Never run
+commands on your own. Never read or write files on your own. Your only job is
+to decide what Codex should say next or which Codex-provided tool(s) Codex
+should execute.
 
 Respect the Codex instructions and conversation below. Tool results already
 present in INPUT_JSON are observations from Codex; consume them and advance the
@@ -448,8 +638,6 @@ fn flatten_tools(tools: &[Value]) -> Vec<ToolRecord> {
                     kind: ToolKind::ToolSearch,
                 });
             }
-            // web_search is provider/server executed rather than a Codex client
-            // tool, so the model-only AGY adapter cannot honestly execute it.
             _ => {}
         }
     }
