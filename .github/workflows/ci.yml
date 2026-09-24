@@ -145,38 +145,34 @@ jobs:
           PY
           chmod +x "$RUNNER_TEMP/fakebin/agy"
 
-      - name: Verify native catalog and official Codex tool loop
+      - name: Verify real Unchained launcher, native catalog, MCP and Codex tool loop
         shell: bash
         run: |
           set -euo pipefail
+          export PATH="$RUNNER_TEMP/fakebin:$HOME/.local/bin:$PATH"
           export UNCHAINED_AGY_BIN="$RUNNER_TEMP/fakebin/agy"
           export UNCHAINED_CODEX_BIN="$HOME/.local/bin/codex"
+          export UNCHAINED_AGY_GATEWAY_BIN="$PWD/agy-gateway/target/release/codex-unchained-agy-gateway"
+          export UNCHAINED_BROWSER_MCP_BIN="$PWD/browser-mcp/target/release/codex-unchained-browser-mcp"
+          export UNCHAINED_HOME="$RUNNER_TEMP/unchained"
 
-          ./agy-gateway/target/release/codex-unchained-agy-gateway >gateway.log 2>&1 &
-          GATEWAY_PID=$!
-          trap 'kill "$GATEWAY_PID" 2>/dev/null || true' EXIT
+          bash bin/codex-unchained exec \
+            --dangerously-bypass-approvals-and-sandbox \
+            --skip-git-repo-check \
+            -m agy/fake-model \
+            'Use exec_command once, then report completion.' \
+            2>&1 | tee codex-smoke.log
 
-          for _ in {1..50}; do
-            curl -fsS http://127.0.0.1:41415/health >/dev/null 2>&1 && break
-            sleep 0.1
-          done
-          curl -fsS http://127.0.0.1:41415/health >/dev/null
+          grep -q 'UNCHAINED_TOOL_LOOP_OK' codex-smoke.log
 
-          curl -fsS http://127.0.0.1:41415/v1/models > "$RUNNER_TEMP/models.json"
           python3 - <<'PY'
           import json, os
-          path = os.path.join(os.environ["RUNNER_TEMP"], "models.json")
+          path = os.path.join(os.environ["UNCHAINED_HOME"], "models.json")
           data = json.load(open(path, encoding="utf-8"))
           slugs = [m["slug"] for m in data["models"]]
           assert "agy/fake-model" in slugs, slugs
           model = next(m for m in data["models"] if m["slug"] == "agy/fake-model")
           assert model["visibility"] == "list"
+          assert model["tool_mode"] == "direct"
           assert model["model_messages"]["instructions_template"]
           PY
-
-          PROVIDER='model_providers.unchained={name="Codex Unchained",base_url="http://127.0.0.1:41415/v1",wire_api="responses",requires_openai_auth=false,supports_websockets=false,supports_standalone_web_search=false}'
-          CATALOG="model_catalog_json=\"$RUNNER_TEMP/models.json\""
-
-          "$HOME/.local/bin/codex" exec             --dangerously-bypass-approvals-and-sandbox             --skip-git-repo-check             -c 'model_provider="unchained"'             -c "$PROVIDER"             -c "$CATALOG"             -m agy/fake-model             'Use exec_command once, then report completion.'             2>&1 | tee codex-smoke.log
-
-          grep -q 'UNCHAINED_TOOL_LOOP_OK' codex-smoke.log
