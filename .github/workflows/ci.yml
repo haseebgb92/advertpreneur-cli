@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  gateway:
+  adapters:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -14,10 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build AGY gateway
+
+      - name: Build brain gateway
         run: cargo build --release --manifest-path agy-gateway/Cargo.toml
-      - name: Rust tests
+
+      - name: Test brain gateway
         run: cargo test --manifest-path agy-gateway/Cargo.toml
+
+      - name: Build browser MCP
+        run: cargo build --release --manifest-path browser-mcp/Cargo.toml
+
+      - name: Test browser MCP
+        run: cargo test --manifest-path browser-mcp/Cargo.toml
+
       - name: Validate PowerShell scripts
         if: runner.os == 'Windows'
         shell: pwsh
@@ -29,7 +38,7 @@ jobs:
           [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'bin/codex-unchained.ps1'), [ref]$null, [ref]$errors)
           if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
 
-  shell:
+  scripts-and-extension:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +46,11 @@ jobs:
         run: |
           bash -n install.sh
           bash -n bin/codex-unchained
+      - name: Validate extension JavaScript
+        run: |
+          node --check extension/background.js
+          node --check extension/content.js
+          python3 -m json.tool extension/manifest.json >/dev/null
 
   upstream-codex-smoke:
     runs-on: ubuntu-latest
@@ -44,8 +58,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Build AGY gateway
-        run: cargo build --release --manifest-path agy-gateway/Cargo.toml
+      - name: Build Unchained adapters
+        run: |
+          cargo build --release --manifest-path agy-gateway/Cargo.toml
+          cargo build --release --manifest-path browser-mcp/Cargo.toml
 
       - name: Install pinned official Codex CLI
         shell: bash
@@ -129,11 +145,13 @@ jobs:
           PY
           chmod +x "$RUNNER_TEMP/fakebin/agy"
 
-      - name: Verify official Codex talks to AGY gateway
+      - name: Verify native catalog and official Codex tool loop
         shell: bash
         run: |
           set -euo pipefail
           export UNCHAINED_AGY_BIN="$RUNNER_TEMP/fakebin/agy"
+          export UNCHAINED_CODEX_BIN="$HOME/.local/bin/codex"
+
           ./agy-gateway/target/release/codex-unchained-agy-gateway >gateway.log 2>&1 &
           GATEWAY_PID=$!
           trap 'kill "$GATEWAY_PID" 2>/dev/null || true' EXIT
@@ -144,15 +162,21 @@ jobs:
           done
           curl -fsS http://127.0.0.1:41415/health >/dev/null
 
-          PROVIDER='model_providers.agy-unchained={name="Antigravity",base_url="http://127.0.0.1:41415/v1",wire_api="responses",requires_openai_auth=false,supports_websockets=false,supports_standalone_web_search=false}'
+          curl -fsS http://127.0.0.1:41415/v1/models > "$RUNNER_TEMP/models.json"
+          python3 - <<'PY'
+          import json, os
+          path = os.path.join(os.environ["RUNNER_TEMP"], "models.json")
+          data = json.load(open(path, encoding="utf-8"))
+          slugs = [m["slug"] for m in data["models"]]
+          assert "agy/fake-model" in slugs, slugs
+          model = next(m for m in data["models"] if m["slug"] == "agy/fake-model")
+          assert model["visibility"] == "list"
+          assert model["model_messages"]["instructions_template"]
+          PY
 
-          "$HOME/.local/bin/codex" exec \
-            --dangerously-bypass-approvals-and-sandbox \
-            --skip-git-repo-check \
-            -c 'model_provider="agy-unchained"' \
-            -c "$PROVIDER" \
-            -m fake-model \
-            'Use exec_command once, then report completion.' \
-            2>&1 | tee codex-smoke.log
+          PROVIDER='model_providers.unchained={name="Codex Unchained",base_url="http://127.0.0.1:41415/v1",wire_api="responses",requires_openai_auth=false,supports_websockets=false,supports_standalone_web_search=false}'
+          CATALOG="model_catalog_json=\"$RUNNER_TEMP/models.json\""
+
+          "$HOME/.local/bin/codex" exec             --dangerously-bypass-approvals-and-sandbox             --skip-git-repo-check             -c 'model_provider="unchained"'             -c "$PROVIDER"             -c "$CATALOG"             -m agy/fake-model             'Use exec_command once, then report completion.'             2>&1 | tee codex-smoke.log
 
           grep -q 'UNCHAINED_TOOL_LOOP_OK' codex-smoke.log
