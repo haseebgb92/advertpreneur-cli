@@ -27,3 +27,100 @@ jobs:
         run: |
           bash -n install.sh
           bash -n bin/codex-unchained
+
+  upstream-codex-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build AGY gateway
+        run: cargo build --release --manifest-path agy-gateway/Cargo.toml
+
+      - name: Install pinned official Codex CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < UPSTREAM_CODEX_VERSION)"
+          curl -fsSL https://chatgpt.com/codex/install.sh |
+            env CODEX_RELEASE="$VERSION" CODEX_NON_INTERACTIVE=1 sh
+          "$HOME/.local/bin/codex" --version
+
+      - name: Create fake model-only AGY backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fakebin"
+          cat > "$RUNNER_TEMP/fakebin/agy" <<'PY'
+          #!/usr/bin/env python3
+          import json
+          import sys
+
+          if len(sys.argv) > 1 and sys.argv[1] == "models":
+              print("fake-model Fake model")
+              raise SystemExit(0)
+
+          prompt = ""
+          for i, arg in enumerate(sys.argv[:-1]):
+              if arg == "-p":
+                  prompt = sys.argv[i + 1]
+                  break
+
+          if '"type": "function_call_output"' in prompt:
+              decision = {
+                  "type": "assistant",
+                  "content": "UNCHAINED_TOOL_LOOP_OK",
+                  "tool_calls": [],
+              }
+          elif '"name": "exec_command"' in prompt:
+              decision = {
+                  "type": "tool_calls",
+                  "content": "",
+                  "tool_calls": [{
+                      "tool_name": "exec_command",
+                      "tool_namespace": "",
+                      "arguments": {"cmd": "printf UNCHAINED_EXEC_OK"},
+                      "input": "",
+                  }],
+              }
+          else:
+              decision = {
+                  "type": "assistant",
+                  "content": "UNCHAINED_SMOKE_OK",
+                  "tool_calls": [],
+              }
+
+          print(json.dumps({
+              "status": "SUCCESS",
+              "structured_output": decision,
+          }))
+          PY
+          chmod +x "$RUNNER_TEMP/fakebin/agy"
+
+      - name: Verify official Codex talks to AGY gateway
+        shell: bash
+        run: |
+          set -euo pipefail
+          export UNCHAINED_AGY_BIN="$RUNNER_TEMP/fakebin/agy"
+          ./agy-gateway/target/release/codex-unchained-agy-gateway >gateway.log 2>&1 &
+          GATEWAY_PID=$!
+          trap 'kill "$GATEWAY_PID" 2>/dev/null || true' EXIT
+
+          for _ in {1..50}; do
+            curl -fsS http://127.0.0.1:41415/health >/dev/null 2>&1 && break
+            sleep 0.1
+          done
+          curl -fsS http://127.0.0.1:41415/health >/dev/null
+
+          PROVIDER='model_providers.agy-unchained={name="Antigravity",base_url="http://127.0.0.1:41415/v1",wire_api="responses",requires_openai_auth=false,supports_websockets=false,supports_standalone_web_search=false}'
+
+          "$HOME/.local/bin/codex" exec \
+            --dangerously-bypass-approvals-and-sandbox \
+            --skip-git-repo-check \
+            -c 'model_provider="agy-unchained"' \
+            -c "$PROVIDER" \
+            -m fake-model \
+            'Use exec_command once, then report completion.' \
+            2>&1 | tee codex-smoke.log
+
+          grep -q 'UNCHAINED_TOOL_LOOP_OK' codex-smoke.log
