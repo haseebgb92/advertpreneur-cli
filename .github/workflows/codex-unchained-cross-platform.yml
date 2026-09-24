@@ -11,13 +11,8 @@ permissions:
 on:
   workflow_dispatch:
   push:
-    branches:
-      - "codex-unchained-*"
     tags:
       - "codex-unchained-v*"
-    paths:
-      - "codex-unchained/**"
-      - ".github/workflows/codex-unchained-cross-platform.yml"
 
 env:
   CARGO_BUILD_JOBS: "1"
