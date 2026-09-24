@@ -6,12 +6,6 @@ concurrency:
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - "codex-unchained-*"
-    paths:
-      - "codex-unchained/**"
-      - ".github/workflows/codex-unchained-package.yml"
 
 jobs:
   adp-unchained-windows:
