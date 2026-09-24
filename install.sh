@@ -12,7 +12,7 @@ command -v cargo >/dev/null 2>&1 || { echo "Rust/Cargo is required to build the 
 mkdir -p "$BIN_DIR" "$LIB_DIR" "$AGENT_DIR"
 
 echo "==> Installing official OpenAI Codex CLI ${CODEX_VERSION}"
-curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_RELEASE="$CODEX_VERSION" sh
+curl -fsSL https://chatgpt.com/codex/install.sh | env CODEX_RELEASE="$CODEX_VERSION" CODEX_NON_INTERACTIVE=1 sh
 
 echo "==> Building AGY compatibility gateway"
 cargo build --release --manifest-path "$ROOT/agy-gateway/Cargo.toml"
