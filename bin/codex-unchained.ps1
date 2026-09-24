@@ -86,7 +86,7 @@ try {
         if (-not $healthy) { throw 'AGY gateway did not become ready' }
     }
 
-    $providerConfig = "model_providers.agy-unchained={name=`"Antigravity`",base_url=`"$GatewayUrl/v1`",wire_api=`"responses`",requires_openai_auth=false}"
+    $providerConfig = "model_providers.agy-unchained={name=`"Antigravity`",base_url=`"$GatewayUrl/v1`",wire_api=`"responses`",requires_openai_auth=false,supports_websockets=false,supports_standalone_web_search=false}"
     $codexArgs = @('-c', 'model_provider="agy-unchained"', '-c', $providerConfig, '-m', $model) + $forward.ToArray()
     & codex @codexArgs
     exit $LASTEXITCODE
