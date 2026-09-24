@@ -6,7 +6,7 @@ $BinDir = Join-Path $InstallRoot 'bin'
 $AgentDir = Join-Path $HOME '.gemini\config\agents\codex-unchained-brain'
 
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
-    throw 'Rust/Cargo is required to build the small AGY gateway. Install rustup, then rerun this installer.'
+    throw 'Rust/Cargo is required to build the two small Unchained adapters.'
 }
 
 New-Item -ItemType Directory -Force -Path $InstallRoot, $BinDir, $AgentDir | Out-Null
@@ -24,10 +24,20 @@ finally {
     if ($null -eq $previousNonInteractive) { Remove-Item Env:CODEX_NON_INTERACTIVE -ErrorAction SilentlyContinue } else { $env:CODEX_NON_INTERACTIVE = $previousNonInteractive }
 }
 
-Write-Host '==> Building AGY compatibility gateway'
+Write-Host '==> Building model-brain gateway'
 & cargo build --release --manifest-path (Join-Path $Root 'agy-gateway\Cargo.toml')
-if ($LASTEXITCODE -ne 0) { throw 'Gateway build failed' }
+if ($LASTEXITCODE -ne 0) { throw 'Brain gateway build failed' }
 Copy-Item (Join-Path $Root 'agy-gateway\target\release\codex-unchained-agy-gateway.exe') (Join-Path $InstallRoot 'codex-unchained-agy-gateway.exe') -Force
+
+Write-Host '==> Building browser MCP bridge'
+& cargo build --release --manifest-path (Join-Path $Root 'browser-mcp\Cargo.toml')
+if ($LASTEXITCODE -ne 0) { throw 'Browser MCP build failed' }
+Copy-Item (Join-Path $Root 'browser-mcp\target\release\codex-unchained-browser-mcp.exe') (Join-Path $InstallRoot 'codex-unchained-browser-mcp.exe') -Force
+
+Write-Host '==> Installing Chrome/Edge extension'
+$ExtensionDest = Join-Path $InstallRoot 'extension'
+if (Test-Path $ExtensionDest) { Remove-Item $ExtensionDest -Recurse -Force }
+Copy-Item (Join-Path $Root 'extension') $ExtensionDest -Recurse -Force
 
 Write-Host '==> Installing model-only Antigravity agent'
 Copy-Item (Join-Path $Root 'agents\codex-unchained-brain\agent.md') (Join-Path $AgentDir 'agent.md') -Force
@@ -44,8 +54,8 @@ if (($userPath -split ';') -notcontains $BinDir) {
 }
 
 Write-Host ''
-Write-Host 'Installed. Run:'
-Write-Host '  codex-unchained doctor'
-Write-Host '  codex-unchained models'
-Write-Host '  codex-unchained -m agy/gemini-3.8-flash-medium'
-Write-Host '  codex-unchained -m ollama/gpt-oss:120b-cloud'
+Write-Host 'Installed.'
+Write-Host 'Run: codex-unchained'
+Write-Host 'Then use /model inside Codex to pick any discovered AGY or Ollama model.'
+Write-Host ''
+Write-Host "Load the browser extension from: $ExtensionDest"
