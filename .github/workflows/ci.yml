@@ -18,6 +18,16 @@ jobs:
         run: cargo build --release --manifest-path agy-gateway/Cargo.toml
       - name: Rust tests
         run: cargo test --manifest-path agy-gateway/Cargo.toml
+      - name: Validate PowerShell scripts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'install.ps1'), [ref]$null, [ref]$errors)
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'bin/codex-unchained.ps1'), [ref]$null, [ref]$errors)
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
 
   shell:
     runs-on: ubuntu-latest
