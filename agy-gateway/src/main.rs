@@ -8,7 +8,13 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{collections::HashSet, env, net::SocketAddr, process::Stdio, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    env,
+    net::SocketAddr,
+    process::Stdio,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio::process::Command;
 use uuid::Uuid;
 
@@ -20,16 +26,35 @@ struct AppState {
 }
 
 #[derive(Debug, Deserialize)]
-struct ChatRequest {
+struct ResponsesRequest {
     model: String,
     #[serde(default)]
-    messages: Vec<Value>,
+    instructions: String,
+    #[serde(default)]
+    input: Vec<Value>,
     #[serde(default)]
     tools: Vec<Value>,
     #[serde(default)]
-    stream: bool,
+    tool_choice: Value,
     #[serde(default)]
-    tool_choice: Option<Value>,
+    parallel_tool_calls: bool,
+    #[allow(dead_code)]
+    #[serde(default)]
+    stream: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ToolKind {
+    Function,
+    Custom,
+    ToolSearch,
+}
+
+#[derive(Debug, Clone)]
+struct ToolRecord {
+    namespace: Option<String>,
+    name: String,
+    kind: ToolKind,
 }
 
 #[tokio::main]
@@ -41,20 +66,27 @@ async fn main() {
         .unwrap_or(41415);
     let state = Arc::new(AppState {
         agy_bin: env::var("UNCHAINED_AGY_BIN").unwrap_or_else(|_| "agy".into()),
-        agent: env::var("UNCHAINED_AGY_AGENT").unwrap_or_else(|_| "codex-unchained-brain".into()),
+        agent: env::var("UNCHAINED_AGY_AGENT")
+            .unwrap_or_else(|_| "codex-unchained-brain".into()),
         timeout: env::var("UNCHAINED_AGY_TIMEOUT").unwrap_or_else(|_| "10m".into()),
     });
 
     let app = Router::new()
         .route("/health", get(health))
         .route("/v1/models", get(models))
-        .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/responses", post(responses))
         .with_state(state);
 
-    let addr: SocketAddr = format!("{host}:{port}").parse().expect("valid listen address");
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind AGY gateway");
+    let addr: SocketAddr = format!("{host}:{port}")
+        .parse()
+        .expect("valid listen address");
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("bind AGY gateway");
     eprintln!("Codex Unchained AGY gateway listening on http://{addr}/v1");
-    axum::serve(listener, app).await.expect("serve AGY gateway");
+    axum::serve(listener, app)
+        .await
+        .expect("serve AGY gateway");
 }
 
 async fn health() -> impl IntoResponse {
@@ -69,33 +101,69 @@ async fn models(State(state): State<Arc<AppState>>) -> Response {
                 .lines()
                 .filter_map(|line| line.split_whitespace().next())
                 .filter(|slug| !slug.is_empty())
-                .map(|slug| json!({"id": slug, "object": "model", "owned_by": "antigravity"}))
+                .map(|slug| {
+                    json!({
+                        "id": slug,
+                        "object": "model",
+                        "owned_by": "antigravity"
+                    })
+                })
                 .collect();
             Json(json!({"object": "list", "data": data})).into_response()
         }
-        Ok(out) => error_response(StatusCode::BAD_GATEWAY, format!(
-            "agy models failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        )),
-        Err(err) => error_response(StatusCode::BAD_GATEWAY, format!("could not run agy: {err}")),
+        Ok(out) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!(
+                "agy models failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        ),
+        Err(err) => error_response(
+            StatusCode::BAD_GATEWAY,
+            format!("could not run agy: {err}"),
+        ),
     }
 }
 
-async fn chat_completions(
+async fn responses(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<ChatRequest>,
+    Json(req): Json<ResponsesRequest>,
 ) -> Response {
-    let allowed_tools = tool_names(&req.tools);
+    let available_tools = flatten_tools(&req.tools);
     let prompt = build_prompt(&req);
+
     let schema = json!({
         "type": "object",
         "properties": {
-            "type": {"type": "string", "enum": ["assistant", "tool_call"]},
+            "type": {
+                "type": "string",
+                "enum": ["assistant", "tool_calls"]
+            },
             "content": {"type": "string"},
-            "tool_name": {"type": "string"},
-            "arguments": {"type": "object"}
+            "tool_calls": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "tool_name": {"type": "string"},
+                        "tool_namespace": {"type": "string"},
+                        "arguments": {
+                            "type": "object",
+                            "additionalProperties": true
+                        },
+                        "input": {"type": "string"}
+                    },
+                    "required": [
+                        "tool_name",
+                        "tool_namespace",
+                        "arguments",
+                        "input"
+                    ],
+                    "additionalProperties": false
+                }
+            }
         },
-        "required": ["type", "content", "tool_name", "arguments"],
+        "required": ["type", "content", "tool_calls"],
         "additionalProperties": false
     })
     .to_string();
@@ -119,7 +187,12 @@ async fn chat_completions(
 
     let output = match cmd.output().await {
         Ok(out) => out,
-        Err(err) => return error_response(StatusCode::BAD_GATEWAY, format!("could not run agy: {err}")),
+        Err(err) => {
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                format!("could not run agy: {err}"),
+            );
+        }
     };
 
     if !output.status.success() {
@@ -139,16 +212,16 @@ async fn chat_completions(
             return error_response(
                 StatusCode::BAD_GATEWAY,
                 format!("invalid AGY JSON envelope: {err}"),
-            )
+            );
         }
     };
 
     if envelope.get("status").and_then(Value::as_str) != Some("SUCCESS") {
-        let msg = envelope
+        let message = envelope
             .get("error")
             .and_then(Value::as_str)
             .unwrap_or("AGY returned a non-success status");
-        return error_response(StatusCode::BAD_GATEWAY, msg.to_string());
+        return error_response(StatusCode::BAD_GATEWAY, message.to_string());
     }
 
     let decision = match envelope.get("structured_output") {
@@ -157,164 +230,369 @@ async fn chat_completions(
             return error_response(
                 StatusCode::BAD_GATEWAY,
                 "AGY did not return structured_output".into(),
-            )
+            );
         }
     };
 
-    let kind = decision.get("type").and_then(Value::as_str).unwrap_or("assistant");
-    if kind == "tool_call" {
-        let name = decision.get("tool_name").and_then(Value::as_str).unwrap_or("");
-        if !allowed_tools.contains(name) {
+    let decision_type = decision
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("assistant");
+
+    if decision_type == "tool_calls" {
+        let calls = decision
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+
+        if calls.is_empty() {
             return error_response(
                 StatusCode::BAD_GATEWAY,
-                format!("AGY selected unavailable Codex tool: {name}"),
+                "AGY selected tool_calls but returned no calls".into(),
             );
+        }
+        if !req.parallel_tool_calls && calls.len() > 1 {
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                "AGY returned parallel tool calls when Codex disabled them".into(),
+            );
+        }
+        if req.tool_choice.as_str() == Some("none") {
+            return error_response(
+                StatusCode::BAD_GATEWAY,
+                "AGY selected a tool while Codex tool_choice was none".into(),
+            );
+        }
+
+        for call in &calls {
+            let name = call
+                .get("tool_name")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let namespace = call
+                .get("tool_namespace")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty());
+            if find_tool(&available_tools, namespace, name).is_none() {
+                let display = namespace
+                    .map(|ns| format!("{ns}.{name}"))
+                    .unwrap_or_else(|| name.to_string());
+                return error_response(
+                    StatusCode::BAD_GATEWAY,
+                    format!("AGY selected unavailable Codex tool: {display}"),
+                );
+            }
         }
     }
 
-    render_completion(&req, &decision)
+    render_responses_sse(&req, &decision, &available_tools)
 }
 
-fn build_prompt(req: &ChatRequest) -> String {
-    let messages = serde_json::to_string_pretty(&req.messages).unwrap_or_else(|_| "[]".into());
+fn build_prompt(req: &ResponsesRequest) -> String {
+    let input = serde_json::to_string_pretty(&req.input).unwrap_or_else(|_| "[]".into());
     let tools = serde_json::to_string_pretty(&req.tools).unwrap_or_else(|_| "[]".into());
-    let tool_choice = req
-        .tool_choice
-        .as_ref()
-        .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "null".into()))
-        .unwrap_or_else(|| "null".into());
+    let tool_choice =
+        serde_json::to_string(&req.tool_choice).unwrap_or_else(|_| "\"auto\"".into());
 
     format!(
-        r#"You are the reasoning/model backend for OpenAI Codex CLI. Codex itself owns the terminal, files, browser, MCP servers, approvals, patching, sandbox, and every other host capability. You must NEVER execute an Antigravity tool or act on the host. Decide only what Codex should say or which ONE Codex-provided tool it should call next.
+        r#"You are ONLY the inference brain for the official OpenAI Codex CLI.
+Codex itself owns the terminal, files, browser/computer control, MCP servers,
+approvals, patching, sandbox, and every other host capability.
 
-Return the enforced JSON object only:
-- type="assistant": put the complete assistant reply in content; tool_name=""; arguments={{}}.
-- type="tool_call": content=""; choose exactly one tool_name from AVAILABLE_CODEX_TOOLS and put valid arguments in arguments.
+Never execute an Antigravity tool. Never browse. Never run commands. Never
+read or write files. Never call an AGY MCP server. Your only job is to decide
+what Codex should say next or which Codex-provided tool(s) Codex should execute.
 
-Do not invent tools. Do not repeat a tool call merely because the previous action already appears in conversation history; use the newest tool result and advance the task. If the requested work is complete, return an assistant message instead of another tool call.
+Respect the Codex instructions and conversation below. Tool results already
+present in INPUT_JSON are observations from Codex; consume them and advance the
+task instead of blindly repeating the preceding tool call.
 
-MODEL: {model}
-TOOL_CHOICE: {tool_choice}
+Return only the enforced structured object:
+- type="assistant": put the complete reply in content and return tool_calls=[].
+- type="tool_calls": content="" and return Codex tool calls.
+- For a normal function tool, put its JSON arguments in arguments and input="".
+- For a custom/freeform tool, put its raw input in input and arguments={{}}.
+- For a namespaced tool, copy both its child tool_name and parent tool_namespace.
+- For a top-level tool, tool_namespace="".
+- If parallel_tool_calls is false, return at most one tool call.
+- Never invent a tool. Use exactly the names and schemas from AVAILABLE_CODEX_TOOLS.
+- Hosted/server-only tools that cannot be represented as Codex client calls must
+  not be selected.
+- When the requested work is complete, return an assistant response.
 
-CONVERSATION_JSON:
-{messages}
+MODEL:
+{model}
+
+CODEX_INSTRUCTIONS:
+{instructions}
+
+TOOL_CHOICE:
+{tool_choice}
+
+PARALLEL_TOOL_CALLS:
+{parallel}
+
+INPUT_JSON:
+{input}
 
 AVAILABLE_CODEX_TOOLS:
 {tools}
 "#,
         model = req.model,
+        instructions = req.instructions,
         tool_choice = tool_choice,
-        messages = messages,
+        parallel = req.parallel_tool_calls,
+        input = input,
         tools = tools,
     )
 }
 
-fn tool_names(tools: &[Value]) -> HashSet<String> {
-    tools
-        .iter()
-        .filter_map(|tool| {
-            tool.get("function")
-                .and_then(|f| f.get("name"))
-                .and_then(Value::as_str)
-                .or_else(|| tool.get("name").and_then(Value::as_str))
-        })
-        .map(ToOwned::to_owned)
-        .collect()
+fn flatten_tools(tools: &[Value]) -> Vec<ToolRecord> {
+    let mut out = Vec::new();
+
+    for tool in tools {
+        match tool.get("type").and_then(Value::as_str).unwrap_or("") {
+            "function" => {
+                if let Some(name) = tool.get("name").and_then(Value::as_str) {
+                    out.push(ToolRecord {
+                        namespace: None,
+                        name: name.to_string(),
+                        kind: ToolKind::Function,
+                    });
+                }
+            }
+            "custom" => {
+                if let Some(name) = tool.get("name").and_then(Value::as_str) {
+                    out.push(ToolRecord {
+                        namespace: None,
+                        name: name.to_string(),
+                        kind: ToolKind::Custom,
+                    });
+                }
+            }
+            "namespace" => {
+                let Some(namespace) = tool.get("name").and_then(Value::as_str) else {
+                    continue;
+                };
+                let children = tool
+                    .get("tools")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                for child in children {
+                    let Some(name) = child.get("name").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    let kind = match child
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .unwrap_or("function")
+                    {
+                        "custom" => ToolKind::Custom,
+                        _ => ToolKind::Function,
+                    };
+                    out.push(ToolRecord {
+                        namespace: Some(namespace.to_string()),
+                        name: name.to_string(),
+                        kind,
+                    });
+                }
+            }
+            "tool_search" => {
+                out.push(ToolRecord {
+                    namespace: None,
+                    name: "tool_search".into(),
+                    kind: ToolKind::ToolSearch,
+                });
+            }
+            // web_search is provider/server executed rather than a Codex client
+            // tool, so the model-only AGY adapter cannot honestly execute it.
+            _ => {}
+        }
+    }
+
+    out
 }
 
-fn render_completion(req: &ChatRequest, decision: &Value) -> Response {
-    let id = format!("chatcmpl-{}", Uuid::new_v4().simple());
-    let created = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let kind = decision.get("type").and_then(Value::as_str).unwrap_or("assistant");
+fn find_tool<'a>(
+    tools: &'a [ToolRecord],
+    namespace: Option<&str>,
+    name: &str,
+) -> Option<&'a ToolRecord> {
+    tools.iter().find(|tool| {
+        tool.name == name
+            && match (&tool.namespace, namespace) {
+                (None, None) => true,
+                (Some(actual), Some(requested)) => actual == requested,
+                _ => false,
+            }
+    })
+}
 
-    if req.stream {
-        let first = if kind == "tool_call" {
+fn render_responses_sse(
+    req: &ResponsesRequest,
+    decision: &Value,
+    available_tools: &[ToolRecord],
+) -> Response {
+    let response_id = format!("resp_{}", Uuid::new_v4().simple());
+    let mut events = Vec::new();
+
+    events.push(json!({
+        "type": "response.created",
+        "response": {"id": response_id}
+    }));
+
+    let decision_type = decision
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("assistant");
+
+    if decision_type == "tool_calls" {
+        let calls = decision
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+
+        for call in calls {
+            let name = call
+                .get("tool_name")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let namespace = call
+                .get("tool_namespace")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty());
+            let Some(tool) = find_tool(available_tools, namespace, name) else {
+                continue;
+            };
+
             let call_id = format!("call_{}", Uuid::new_v4().simple());
-            let name = decision.get("tool_name").and_then(Value::as_str).unwrap_or("");
-            let args = decision.get("arguments").cloned().unwrap_or_else(|| json!({}));
-            json!({
-                "id": id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": req.model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {
-                        "role": "assistant",
-                        "tool_calls": [{
-                            "index": 0,
-                            "id": call_id,
-                            "type": "function",
-                            "function": {"name": name, "arguments": args.to_string()}
-                        }]
-                    },
-                    "finish_reason": null
-                }]
-            })
-        } else {
-            let content = decision.get("content").and_then(Value::as_str).unwrap_or("");
-            json!({
-                "id": id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": req.model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {"role": "assistant", "content": content},
-                    "finish_reason": null
-                }]
-            })
-        };
+            let item = match tool.kind {
+                ToolKind::Function => {
+                    let arguments = call
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or_else(|| json!({}))
+                        .to_string();
+                    let mut item = json!({
+                        "type": "function_call",
+                        "call_id": call_id,
+                        "name": tool.name,
+                        "arguments": arguments
+                    });
+                    if let Some(namespace) = &tool.namespace {
+                        item["namespace"] = Value::String(namespace.clone());
+                    }
+                    item
+                }
+                ToolKind::Custom => {
+                    let input = call
+                        .get("input")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let mut item = json!({
+                        "type": "custom_tool_call",
+                        "call_id": call_id,
+                        "name": tool.name,
+                        "input": input
+                    });
+                    if let Some(namespace) = &tool.namespace {
+                        item["namespace"] = Value::String(namespace.clone());
+                    }
+                    item
+                }
+                ToolKind::ToolSearch => {
+                    let arguments = call
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or_else(|| json!({}));
+                    json!({
+                        "type": "tool_search_call",
+                        "call_id": call_id,
+                        "execution": "client",
+                        "arguments": arguments
+                    })
+                }
+            };
 
-        let finish_reason = if kind == "tool_call" { "tool_calls" } else { "stop" };
-        let last = json!({
-            "id": id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": req.model,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}]
-        });
-        let payload = format!("data: {first}\n\ndata: {last}\n\ndata: [DONE]\n\n");
-        let mut response = Response::new(Body::from(payload));
-        *response.status_mut() = StatusCode::OK;
-        response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
-        response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-        response
+            events.push(json!({
+                "type": "response.output_item.done",
+                "item": item
+            }));
+        }
     } else {
-        let message = if kind == "tool_call" {
-            let call_id = format!("call_{}", Uuid::new_v4().simple());
-            let name = decision.get("tool_name").and_then(Value::as_str).unwrap_or("");
-            let args = decision.get("arguments").cloned().unwrap_or_else(|| json!({}));
-            json!({
+        let content = decision
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        events.push(json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "message",
                 "role": "assistant",
-                "content": null,
-                "tool_calls": [{
-                    "id": call_id,
-                    "type": "function",
-                    "function": {"name": name, "arguments": args.to_string()}
+                "id": format!("msg_{}", Uuid::new_v4().simple()),
+                "content": [{
+                    "type": "output_text",
+                    "text": content
                 }]
-            })
-        } else {
-            json!({
-                "role": "assistant",
-                "content": decision.get("content").and_then(Value::as_str).unwrap_or("")
-            })
-        };
-        let finish_reason = if kind == "tool_call" { "tool_calls" } else { "stop" };
-        Json(json!({
-            "id": id,
-            "object": "chat.completion",
-            "created": created,
-            "model": req.model,
-            "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}]
-        }))
-        .into_response()
+            }
+        }));
     }
+
+    events.push(json!({
+        "type": "response.completed",
+        "response": {
+            "id": response_id,
+            "model": req.model,
+            "usage": {
+                "input_tokens": 0,
+                "input_tokens_details": null,
+                "output_tokens": 0,
+                "output_tokens_details": null,
+                "total_tokens": 0
+            }
+        }
+    }));
+
+    let mut payload = String::new();
+    for event in events {
+        let event_type = event
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("message");
+        payload.push_str("event: ");
+        payload.push_str(event_type);
+        payload.push('\n');
+        payload.push_str("data: ");
+        payload.push_str(&event.to_string());
+        payload.push_str("\n\n");
+    }
+
+    let mut response = Response::new(Body::from(payload));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/event-stream"),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-cache"),
+    );
+    response
 }
 
 fn error_response(status: StatusCode, message: String) -> Response {
-    (status, Json(json!({"error": {"message": message, "type": "codex_unchained_gateway_error"}}))).into_response()
+    (
+        status,
+        Json(json!({
+            "error": {
+                "message": message,
+                "type": "codex_unchained_gateway_error"
+            }
+        })),
+    )
+        .into_response()
 }
