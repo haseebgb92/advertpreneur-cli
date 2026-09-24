@@ -183,8 +183,13 @@ async fn build_codex_catalog(state: &AppState) -> Result<Value, String> {
         model["default_verbosity"] = Value::Null;
         model["supports_search_tool"] = Value::Bool(false);
         model["input_modalities"] = json!(["text"]);
+        model["tool_mode"] = Value::String("direct".into());
+        model["use_responses_lite"] = Value::Bool(false);
 
-        // Keep Codex's own base instructions, tool metadata, shell/apply-patch
+        // Keep Codex's own base instructions, shell/apply-patch, compaction
+        // policy, and other runtime metadata. The direct tool presentation is
+        // selected deliberately because AGY/Ollama consume ordinary Codex tool
+        // schemas rather than Astra's provider-specific code-mode transport.
         // behavior, compaction policy, and other runtime metadata from the
         // currently installed official Codex build.
         models.push(model);
