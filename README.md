@@ -10,9 +10,9 @@ Current upstream lock: **Codex CLI 0.156.1**.
 
 ### AGY / Google Antigravity
 
-AGY runs as a model-only backend. A tiny local compatibility gateway converts Codex's OpenAI Responses API requests into headless `agy` requests and converts the structured answer back into native Codex Responses API events.
+AGY runs as a model-only backend. A tiny local compatibility gateway converts Codex's native Responses API requests into headless `agy` requests and converts the structured answer back into native Codex Responses API events. The Codex context is sent to AGY over its `stream-json` stdin protocol rather than as a command-line argument, so large contexts remain practical on Windows as well as Linux/macOS.
 
-The bundled Antigravity custom agent has `tools: []`, `inheritMcp: false`, and command execution disabled. Codex remains the only component allowed to use host tools.
+The bundled Antigravity custom agent has `tools: []`, `inheritMcp: false`, and command execution disabled. Codex remains the only component allowed to use host tools. Provider-native server tools such as OpenAI-hosted web search are not impersonated by the gateway; browser/MCP/shell/file actions continue through Codex.
 
 Examples:
 
